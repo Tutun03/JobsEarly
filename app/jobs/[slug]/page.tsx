@@ -70,7 +70,7 @@ async function getJob(slug: string): Promise<Job | null> {
 
     const siteUrl =
       process.env.NEXT_PUBLIC_SITE_URL ||
-      "https://jobsearly.aniketacharya30.workers.dev";
+      "https://jobsearly.dailyupdate.workers.dev";
 
     const response = await fetch(
       `${siteUrl}/api/jobs?location=IN`,

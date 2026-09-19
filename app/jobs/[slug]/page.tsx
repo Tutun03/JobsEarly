@@ -58,19 +58,22 @@ interface ApiResponse {
  * This keeps the detail page synchronized with the homepage.
  */
 
-async function getJob(
-  slug: string
-): Promise<Job | null> {
+async function getJob(slug: string): Promise<Job | null> {
   try {
     /*
-     * Fetch jobs from our internal API.
+     * Fetch jobs from our deployed internal API.
      *
-     * The API route decides how many jobs
-     * should be returned.
+     * IMPORTANT:
+     * Do NOT use localhost here because this code
+     * also runs on Cloudflare production.
      */
 
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      "https://jobsearly.aniketacharya30.workers.dev";
+
     const response = await fetch(
-      "http://localhost:3000/api/jobs?location=IN",
+      `${siteUrl}/api/jobs?location=IN`,
       {
         cache: "no-store",
       }
@@ -102,9 +105,7 @@ async function getJob(
 
     if (
       !result?.data?.items ||
-      !Array.isArray(
-        result.data.items
-      )
+      !Array.isArray(result.data.items)
     ) {
       console.error(
         "Invalid jobs API response"
@@ -131,8 +132,7 @@ async function getJob(
      * etc.
      */
 
-    const jobs =
-      result.data.items;
+    const jobs = result.data.items;
 
     /*
      * Decode the requested slug safely.
@@ -141,8 +141,7 @@ async function getJob(
     let requestedSlug = slug;
 
     try {
-      requestedSlug =
-        decodeURIComponent(slug);
+      requestedSlug = decodeURIComponent(slug);
     } catch {
       requestedSlug = slug;
     }
@@ -153,12 +152,10 @@ async function getJob(
      * ========================================================
      */
 
-    const exactMatch =
-      jobs.find(
-        (job) =>
-          job.slug ===
-          requestedSlug
-      );
+    const exactMatch = jobs.find(
+      (job) =>
+        job.slug === requestedSlug
+    );
 
     if (exactMatch) {
       return exactMatch;
@@ -199,27 +196,17 @@ async function getJob(
       return value
         .trim()
         .toLowerCase()
-        .replace(
-          /%20/g,
-          "-"
-        )
-        .replace(
-          /\s+/g,
-          "-"
-        );
+        .replace(/%20/g, "-")
+        .replace(/\s+/g, "-");
     };
 
     const normalizedRequestedSlug =
-      normalizeSlug(
-        requestedSlug
-      );
+      normalizeSlug(requestedSlug);
 
     const normalizedMatch =
       jobs.find(
         (job) =>
-          normalizeSlug(
-            job.slug
-          ) ===
+          normalizeSlug(job.slug) ===
           normalizedRequestedSlug
       );
 
@@ -231,8 +218,6 @@ async function getJob(
      * ========================================================
      * JOB NOT FOUND
      * ========================================================
-     *
-     * Useful for debugging.
      */
 
     console.error(
@@ -242,8 +227,7 @@ async function getJob(
 
         availableSlugs:
           jobs.map(
-            (job) =>
-              job.slug
+            (job) => job.slug
           ),
       }
     );
@@ -276,15 +260,13 @@ export default async function JobDetailsPage({
    * Next.js dynamic route params
    */
 
-  const { slug } =
-    await params;
+  const { slug } = await params;
 
   /*
    * Find requested job
    */
 
-  const job =
-    await getJob(slug);
+  const job = await getJob(slug);
 
   /*
    * If job doesn't exist,
@@ -308,71 +290,65 @@ export default async function JobDetailsPage({
           ← Back to jobs
         </a>
 
-        {/* JOB DETAILS CARD */}
+        {/* JOB HEADER */}
 
         <article className="job-details-card">
 
-          {/* HEADER */}
+          <div className="job-header">
 
-          <div className="job-details-header">
-
-            <div className="job-details-top">
-
-              <div className="company-logo job-details-logo">
-
-                {job.logo ? (
-                  <img
-                    src={job.logo}
-                    alt={job.company}
-                  />
-                ) : (
-                  job.company
-                    ?.charAt(0)
-                    ?.toUpperCase()
-                )}
-
-              </div>
-
-              <div className="job-details-company">
-                {job.company}
-              </div>
-
+            <div className="job-company-logo">
+              {job.logo ? (
+                <img
+                  src={job.logo}
+                  alt={job.company}
+                />
+              ) : (
+                <span>
+                  {job.company?.charAt(0)}
+                </span>
+              )}
             </div>
 
-            <h1 className="job-details-title">
-              {job.title}
-            </h1>
+            <div>
 
-            <div className="job-details-meta">
+              <h1>
+                {job.title}
+              </h1>
 
-              <span>
-                📍{" "}
-                {job.city ||
-                  job.state ||
-                  job.country ||
-                  "India"}
-              </span>
+              <p className="job-company">
+                {job.company}
+              </p>
 
-              <span>
-                💼{" "}
-                {job.job_type
-                  ? job.job_type.replace(
-                      /_/g,
-                      " "
-                    )
-                  : "Full-Time"}
-              </span>
+              <div className="job-meta">
 
-              <span>
-                🎓{" "}
-                {job.exp_min ??
-                  0}{" "}
-                -{" "}
-                {job.exp_max ??
-                  0}{" "}
-                {job.exp_unit ||
-                  "years"}
-              </span>
+                <span>
+                  📍{" "}
+                  {job.city ||
+                    job.state ||
+                    job.country ||
+                    "India"}
+                </span>
+
+                <span>
+                  💼{" "}
+                  {job.job_type
+                    ? job.job_type.replace(
+                        /_/g,
+                        " "
+                      )
+                    : "Full-Time"}
+                </span>
+
+                <span>
+                  🎓{" "}
+                  {job.exp_min ?? 0}{" "}
+                  -{" "}
+                  {job.exp_max ?? 0}{" "}
+                  {job.exp_unit ||
+                    "years"}
+                </span>
+
+              </div>
 
             </div>
 
@@ -490,11 +466,9 @@ export default async function JobDetailsPage({
               </span>
 
               <strong>
-                {job.exp_min ??
-                  0}{" "}
+                {job.exp_min ?? 0}{" "}
                 -{" "}
-                {job.exp_max ??
-                  0}{" "}
+                {job.exp_max ?? 0}{" "}
                 {job.exp_unit ||
                   "years"}
               </strong>

@@ -42,24 +42,29 @@ export default async function JobDetailsPage({
 }: PageProps) {
   const { slug } = await params;
 
-  console.log(
-    "======================================"
-  );
-
-  console.log(
-    "[JOB PAGE] Requested slug:",
-    slug
-  );
+  console.log("======================================");
+  console.log("[JOB PAGE] Requested slug:", slug);
 
   try {
-    const { env } =
-      await getCloudflareContext({
-        async: true,
-      });
+    /*
+    |--------------------------------------------------------------------------
+    | CLOUDFLARE CONTEXT
+    |--------------------------------------------------------------------------
+    */
+
+    const { env } = await getCloudflareContext({
+      async: true,
+    });
 
     console.log(
       "[JOB PAGE] Cloudflare context loaded"
     );
+
+    /*
+    |--------------------------------------------------------------------------
+    | D1 DATABASE
+    |--------------------------------------------------------------------------
+    */
 
     const db = env.jobsearly_db;
 
@@ -77,37 +82,36 @@ export default async function JobDetailsPage({
     |--------------------------------------------------------------------------
     */
 
-    const result =
-      await db
-        .prepare(
-          `
-          SELECT
-            id,
-            slug,
-            title,
-            company,
-            logo,
-            description,
-            city,
-            state,
-            country,
-            job_type,
-            salary_min,
-            salary_max,
-            salary_curr,
-            exp_min,
-            exp_max,
-            exp_unit,
-            skills,
-            posted_date,
-            url
-          FROM jobs
-          WHERE slug = ?
-          LIMIT 1
-          `
-        )
-        .bind(slug)
-        .first<Job>();
+    const result = await db
+      .prepare(
+        `
+        SELECT
+          id,
+          slug,
+          title,
+          company,
+          logo,
+          description,
+          city,
+          state,
+          country,
+          job_type,
+          salary_min,
+          salary_max,
+          salary_curr,
+          exp_min,
+          exp_max,
+          exp_unit,
+          skills,
+          posted_date,
+          url
+        FROM jobs
+        WHERE slug = ?
+        LIMIT 1
+        `
+      )
+      .bind(slug)
+      .first<Job>();
 
     console.log(
       "[JOB PAGE] Database result:",
@@ -142,21 +146,38 @@ export default async function JobDetailsPage({
 
     if (job.skills) {
       try {
-        const parsed =
+        const parsed: unknown =
           JSON.parse(job.skills);
 
-        if (Array.isArray(parsed)) {
-          skills = parsed;
+        if (
+          Array.isArray(parsed)
+        ) {
+          skills = parsed
+            .map((skill: unknown) =>
+              String(skill).trim()
+            )
+            .filter(
+              (skill: string) =>
+                skill.length > 0
+            );
         } else {
-          skills = [String(parsed)];
+          skills = [
+            String(parsed).trim(),
+          ].filter(
+            (skill: string) =>
+              skill.length > 0
+          );
         }
       } catch {
         skills = job.skills
           .split(",")
-          .map((skill) =>
+          .map((skill: string) =>
             skill.trim()
           )
-          .filter(Boolean);
+          .filter(
+            (skill: string) =>
+              skill.length > 0
+          );
       }
     }
 
@@ -173,9 +194,9 @@ export default async function JobDetailsPage({
       job.exp_min != null &&
       job.exp_max != null
     ) {
-      experience = `${job.exp_min} - ${job.exp_max} ${
-        job.exp_unit || "years"
-      }`;
+      experience = `${job.exp_min} - ${
+        job.exp_max
+      } ${job.exp_unit || "years"}`;
     } else if (
       job.exp_min != null
     ) {
@@ -185,9 +206,9 @@ export default async function JobDetailsPage({
     } else if (
       job.exp_max != null
     ) {
-      experience = `Up to ${job.exp_max} ${
-        job.exp_unit || "years"
-      }`;
+      experience = `Up to ${
+        job.exp_max
+      } ${job.exp_unit || "years"}`;
     }
 
     /*
@@ -196,13 +217,12 @@ export default async function JobDetailsPage({
     |--------------------------------------------------------------------------
     */
 
-    const jobType =
-      job.job_type
-        ? job.job_type.replace(
-            /_/g,
-            " "
-          )
-        : "Full-Time";
+    const jobType = job.job_type
+      ? job.job_type.replace(
+          /_/g,
+          " "
+        )
+      : "Full-Time";
 
     /*
     |--------------------------------------------------------------------------
@@ -231,9 +251,7 @@ export default async function JobDetailsPage({
     ) {
       salary = `${
         job.salary_curr || "₹"
-      } ${job.salary_min.toLocaleString()} - ${
-        job.salary_max
-      .toLocaleString()}`;
+      } ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`;
     } else if (
       job.salary_min != null
     ) {
@@ -254,7 +272,6 @@ export default async function JobDetailsPage({
 
         <header className="site-header">
           <div className="container navbar">
-
             <a
               href="/"
               className="logo"
@@ -272,14 +289,12 @@ export default async function JobDetailsPage({
             >
               Contact
             </a>
-
           </div>
         </header>
 
         {/* JOB DETAILS */}
 
         <main className="job-detail-page">
-
           <div className="container">
 
             {/* BACK */}
@@ -295,7 +310,6 @@ export default async function JobDetailsPage({
             <section className="job-detail-header">
 
               <div className="job-detail-company-logo">
-
                 {job.logo ? (
                   <img
                     src={job.logo}
@@ -306,7 +320,6 @@ export default async function JobDetailsPage({
                     ?.charAt(0)
                     ?.toUpperCase()
                 )}
-
               </div>
 
               <div className="job-detail-header-content">
@@ -475,8 +488,8 @@ export default async function JobDetailsPage({
 
                       {skills.map(
                         (
-                          skill,
-                          index
+                          skill: string,
+                          index: number
                         ) => (
                           <span
                             key={`${skill}-${index}`}
@@ -497,7 +510,6 @@ export default async function JobDetailsPage({
             </div>
 
           </div>
-
         </main>
 
         {/* FOOTER */}

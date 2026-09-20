@@ -24,48 +24,32 @@ interface Job {
 
 interface ApiResponse {
   success: boolean;
-
-  data: {
-    items: Job[];
-    total: number;
-    limit: number;
-    offset: number;
-    has_more: boolean;
-  };
-
-  message?: string;
+  data?: Job;
+  error?: string;
 }
 
-/*
- * ============================================================
- * GET JOB
- * ============================================================
- *
- * We fetch the complete list returned by:
- *
- * /api/jobs
- *
- * IMPORTANT:
- *
- * There is NO hard-coded 30 or 40 here.
- *
- * Therefore, if the API route returns:
- *
- * 30 jobs -> all 30 are searched
- * 40 jobs -> all 40 are searched
- * 50 jobs -> all 50 are searched
- *
- * This keeps the detail page synchronized with the homepage.
- */
+// ============================================================
+// GET SINGLE JOB
+// ============================================================
 
-async function getJob(slug: string): Promise<Job | null> {
+async function getJob(
+  slug: string
+): Promise<Job | null> {
   try {
+    let requestedSlug = slug;
+
+    try {
+      requestedSlug =
+        decodeURIComponent(slug);
+    } catch {
+      requestedSlug = slug;
+    }
+
     /*
-     * Fetch jobs from our deployed internal API.
+     * Use the application's own API route.
      *
-     * IMPORTANT:
-     * Do NOT use localhost here because this code
-     * also runs on Cloudflare production.
+     * This route talks securely to Artha using
+     * ARTHA_API_KEY.
      */
 
     const siteUrl =
@@ -73,166 +57,39 @@ async function getJob(slug: string): Promise<Job | null> {
       "https://jobsearly.dailyupdate.workers.dev";
 
     const response = await fetch(
-      `${siteUrl}/api/jobs?location=IN`,
+      `${siteUrl}/api/jobs/${encodeURIComponent(
+        requestedSlug
+      )}`,
       {
         cache: "no-store",
       }
     );
 
-    /*
-     * API request failed
-     */
-
     if (!response.ok) {
       console.error(
-        "Jobs API error:",
+        "Job detail API error:",
         response.status
       );
 
       return null;
     }
 
-    /*
-     * Parse response
-     */
-
     const result: ApiResponse =
       await response.json();
 
-    /*
-     * Validate response
-     */
-
     if (
-      !result?.data?.items ||
-      !Array.isArray(result.data.items)
+      !result?.success ||
+      !result?.data
     ) {
       console.error(
-        "Invalid jobs API response"
+        "Invalid job detail response:",
+        result
       );
 
       return null;
     }
 
-    /*
-     * ========================================================
-     * IMPORTANT
-     * ========================================================
-     *
-     * DO NOT slice to 30.
-     *
-     * Use every job returned by the API.
-     *
-     * This makes this page dynamically support:
-     *
-     * 30 jobs
-     * 40 jobs
-     * 50 jobs
-     * 100 jobs
-     * etc.
-     */
-
-    const jobs = result.data.items;
-
-    /*
-     * Decode the requested slug safely.
-     */
-
-    let requestedSlug = slug;
-
-    try {
-      requestedSlug = decodeURIComponent(slug);
-    } catch {
-      requestedSlug = slug;
-    }
-
-    /*
-     * ========================================================
-     * 1. EXACT MATCH
-     * ========================================================
-     */
-
-    const exactMatch = jobs.find(
-      (job) =>
-        job.slug === requestedSlug
-    );
-
-    if (exactMatch) {
-      return exactMatch;
-    }
-
-    /*
-     * ========================================================
-     * 2. CASE-INSENSITIVE MATCH
-     * ========================================================
-     */
-
-    const caseInsensitiveMatch =
-      jobs.find(
-        (job) =>
-          job.slug?.toLowerCase() ===
-          requestedSlug.toLowerCase()
-      );
-
-    if (caseInsensitiveMatch) {
-      return caseInsensitiveMatch;
-    }
-
-    /*
-     * ========================================================
-     * 3. NORMALIZED MATCH
-     * ========================================================
-     *
-     * Handles:
-     *
-     * My Job
-     * my-job
-     * MY-JOB
-     */
-
-    const normalizeSlug = (
-      value: string
-    ) => {
-      return value
-        .trim()
-        .toLowerCase()
-        .replace(/%20/g, "-")
-        .replace(/\s+/g, "-");
-    };
-
-    const normalizedRequestedSlug =
-      normalizeSlug(requestedSlug);
-
-    const normalizedMatch =
-      jobs.find(
-        (job) =>
-          normalizeSlug(job.slug) ===
-          normalizedRequestedSlug
-      );
-
-    if (normalizedMatch) {
-      return normalizedMatch;
-    }
-
-    /*
-     * ========================================================
-     * JOB NOT FOUND
-     * ========================================================
-     */
-
-    console.error(
-      "JOB NOT FOUND",
-      {
-        requestedSlug,
-
-        availableSlugs:
-          jobs.map(
-            (job) => job.slug
-          ),
-      }
-    );
-
-    return null;
+    return result.data;
   } catch (error) {
     console.error(
       "Job details error:",
@@ -243,11 +100,9 @@ async function getJob(slug: string): Promise<Job | null> {
   }
 }
 
-/*
- * ============================================================
- * JOB DETAILS PAGE
- * ============================================================
- */
+// ============================================================
+// JOB DETAILS PAGE
+// ============================================================
 
 export default async function JobDetailsPage({
   params,
@@ -256,26 +111,38 @@ export default async function JobDetailsPage({
     slug: string;
   }>;
 }) {
-  /*
-   * Next.js dynamic route params
-   */
-
   const { slug } = await params;
 
-  /*
-   * Find requested job
-   */
-
   const job = await getJob(slug);
-
-  /*
-   * If job doesn't exist,
-   * show Next.js 404 page.
-   */
 
   if (!job) {
     notFound();
   }
+
+  const location =
+    job.city ||
+    job.state ||
+    job.country ||
+    "India";
+
+  const jobType =
+    job.job_type
+      ? job.job_type.replace(
+          /_/g,
+          " "
+        )
+      : "Full-Time";
+
+  const experience =
+    `${job.exp_min ?? 0} - ${
+      job.exp_max ?? 0
+    } ${job.exp_unit || "years"}`;
+
+  const salary =
+    job.salary_min != null &&
+    job.salary_max != null
+      ? `${job.salary_curr || "₹"} ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`
+      : "Not disclosed";
 
   return (
     <main className="job-details-page">
@@ -290,23 +157,29 @@ export default async function JobDetailsPage({
           ← Back to jobs
         </a>
 
-        {/* JOB HEADER */}
+        {/* JOB CARD */}
 
         <article className="job-details-card">
+
+          {/* HEADER */}
 
           <div className="job-header">
 
             <div className="job-company-logo">
+
               {job.logo ? (
                 <img
                   src={job.logo}
-                  alt={job.company}
+                  alt={`${job.company} logo`}
                 />
               ) : (
                 <span>
-                  {job.company?.charAt(0)}
+                  {job.company
+                    ?.charAt(0)
+                    ?.toUpperCase()}
                 </span>
               )}
+
             </div>
 
             <div>
@@ -322,30 +195,15 @@ export default async function JobDetailsPage({
               <div className="job-meta">
 
                 <span>
-                  📍{" "}
-                  {job.city ||
-                    job.state ||
-                    job.country ||
-                    "India"}
+                  📍 {location}
                 </span>
 
                 <span>
-                  💼{" "}
-                  {job.job_type
-                    ? job.job_type.replace(
-                        /_/g,
-                        " "
-                      )
-                    : "Full-Time"}
+                  💼 {jobType}
                 </span>
 
                 <span>
-                  🎓{" "}
-                  {job.exp_min ?? 0}{" "}
-                  -{" "}
-                  {job.exp_max ?? 0}{" "}
-                  {job.exp_unit ||
-                    "years"}
+                  🎓 {experience}
                 </span>
 
               </div>
@@ -354,7 +212,7 @@ export default async function JobDetailsPage({
 
           </div>
 
-          {/* APPLY SECTION */}
+          {/* APPLY */}
 
           <div className="job-apply-section">
 
@@ -436,60 +294,38 @@ export default async function JobDetailsPage({
             </div>
           )}
 
-          {/* EXTRA INFO */}
+          {/* EXTRA INFORMATION */}
 
           <div className="job-extra-info">
 
-            {/* SALARY */}
-
             <div>
-
               <span>
                 Salary
               </span>
 
               <strong>
-                {job.salary_min != null &&
-                job.salary_max != null
-                  ? `${job.salary_curr || "₹"} ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`
-                  : "Not disclosed"}
+                {salary}
               </strong>
-
             </div>
 
-            {/* EXPERIENCE */}
-
             <div>
-
               <span>
                 Experience
               </span>
 
               <strong>
-                {job.exp_min ?? 0}{" "}
-                -{" "}
-                {job.exp_max ?? 0}{" "}
-                {job.exp_unit ||
-                  "years"}
+                {experience}
               </strong>
-
             </div>
 
-            {/* LOCATION */}
-
             <div>
-
               <span>
                 Location
               </span>
 
               <strong>
-                {job.city ||
-                  job.state ||
-                  job.country ||
-                  "India"}
+                {location}
               </strong>
-
             </div>
 
           </div>
@@ -504,7 +340,6 @@ export default async function JobDetailsPage({
               rel="noopener noreferrer"
               className="apply-button"
             >
-
               <span>
                 View & Apply
               </span>
@@ -512,7 +347,6 @@ export default async function JobDetailsPage({
               <span className="apply-arrow">
                 →
               </span>
-
             </a>
 
           </div>

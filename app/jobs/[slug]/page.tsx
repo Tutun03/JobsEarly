@@ -37,9 +37,7 @@ interface PageProps {
 
 export const dynamic = "force-dynamic";
 
-export default async function JobDetailsPage({
-  params,
-}: PageProps) {
+export default async function JobDetailsPage({ params }: PageProps) {
   const { slug } = await params;
 
   console.log("======================================");
@@ -56,9 +54,7 @@ export default async function JobDetailsPage({
       async: true,
     });
 
-    console.log(
-      "[JOB PAGE] Cloudflare context loaded"
-    );
+    console.log("[JOB PAGE] Cloudflare context loaded");
 
     /*
     |--------------------------------------------------------------------------
@@ -69,9 +65,7 @@ export default async function JobDetailsPage({
     const db = env.jobsearly_db;
 
     if (!db) {
-      console.error(
-        "[JOB PAGE] D1 binding jobsearly_db is missing"
-      );
+      console.error("[JOB PAGE] D1 binding jobsearly_db is missing");
 
       notFound();
     }
@@ -108,7 +102,7 @@ export default async function JobDetailsPage({
         FROM jobs
         WHERE slug = ?
         LIMIT 1
-        `
+        `,
       )
       .bind(slug)
       .first<Job>();
@@ -122,14 +116,11 @@ export default async function JobDetailsPage({
             title: result.title,
             company: result.company,
           }
-        : "NOT FOUND"
+        : "NOT FOUND",
     );
 
     if (!result) {
-      console.error(
-        "[JOB PAGE] Job not found for slug:",
-        slug
-      );
+      console.error("[JOB PAGE] Job not found for slug:", slug);
 
       notFound();
     }
@@ -146,38 +137,22 @@ export default async function JobDetailsPage({
 
     if (job.skills) {
       try {
-        const parsed: unknown =
-          JSON.parse(job.skills);
+        const parsed: unknown = JSON.parse(job.skills);
 
-        if (
-          Array.isArray(parsed)
-        ) {
+        if (Array.isArray(parsed)) {
           skills = parsed
-            .map((skill: unknown) =>
-              String(skill).trim()
-            )
-            .filter(
-              (skill: string) =>
-                skill.length > 0
-            );
+            .map((skill: unknown) => String(skill).trim())
+            .filter((skill: string) => skill.length > 0);
         } else {
-          skills = [
-            String(parsed).trim(),
-          ].filter(
-            (skill: string) =>
-              skill.length > 0
+          skills = [String(parsed).trim()].filter(
+            (skill: string) => skill.length > 0,
           );
         }
       } catch {
         skills = job.skills
           .split(",")
-          .map((skill: string) =>
-            skill.trim()
-          )
-          .filter(
-            (skill: string) =>
-              skill.length > 0
-          );
+          .map((skill: string) => skill.trim())
+          .filter((skill: string) => skill.length > 0);
       }
     }
 
@@ -187,28 +162,14 @@ export default async function JobDetailsPage({
     |--------------------------------------------------------------------------
     */
 
-    let experience =
-      "Experience not specified";
+    let experience = "Experience not specified";
 
-    if (
-      job.exp_min != null &&
-      job.exp_max != null
-    ) {
-      experience = `${job.exp_min} - ${
-        job.exp_max
-      } ${job.exp_unit || "years"}`;
-    } else if (
-      job.exp_min != null
-    ) {
-      experience = `${job.exp_min}+ ${
-        job.exp_unit || "years"
-      }`;
-    } else if (
-      job.exp_max != null
-    ) {
-      experience = `Up to ${
-        job.exp_max
-      } ${job.exp_unit || "years"}`;
+    if (job.exp_min != null && job.exp_max != null) {
+      experience = `${job.exp_min} - ${job.exp_max} ${job.exp_unit || "years"}`;
+    } else if (job.exp_min != null) {
+      experience = `${job.exp_min}+ ${job.exp_unit || "years"}`;
+    } else if (job.exp_max != null) {
+      experience = `Up to ${job.exp_max} ${job.exp_unit || "years"}`;
     }
 
     /*
@@ -218,10 +179,7 @@ export default async function JobDetailsPage({
     */
 
     const jobType = job.job_type
-      ? job.job_type.replace(
-          /_/g,
-          " "
-        )
+      ? job.job_type.replace(/_/g, " ")
       : "Full-Time";
 
     /*
@@ -230,11 +188,7 @@ export default async function JobDetailsPage({
     |--------------------------------------------------------------------------
     */
 
-    const location =
-      job.city ||
-      job.state ||
-      job.country ||
-      "India";
+    const location = job.city || job.state || job.country || "India";
 
     /*
     |--------------------------------------------------------------------------
@@ -242,22 +196,14 @@ export default async function JobDetailsPage({
     |--------------------------------------------------------------------------
     */
 
-    let salary =
-      "Salary not disclosed";
+    let salary = "Salary not disclosed";
 
-    if (
-      job.salary_min != null &&
-      job.salary_max != null
-    ) {
+    if (job.salary_min != null && job.salary_max != null) {
       salary = `${
         job.salary_curr || "₹"
       } ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`;
-    } else if (
-      job.salary_min != null
-    ) {
-      salary = `${
-        job.salary_curr || "₹"
-      } ${job.salary_min.toLocaleString()}+`;
+    } else if (job.salary_min != null) {
+      salary = `${job.salary_curr || "₹"} ${job.salary_min.toLocaleString()}+`;
     }
 
     /*
@@ -272,21 +218,12 @@ export default async function JobDetailsPage({
 
         <header className="site-header">
           <div className="container navbar">
-            <a
-              href="/"
-              className="logo"
-            >
-              <span className="logo-mark">
-                J
-              </span>
-
+            <a href="/" className="logo">
+              <span className="logo-mark">J</span>
               JobsEarly
             </a>
 
-            <a
-              href="/#contact"
-              className="contact-link"
-            >
+            <a href="/#contact" className="contact-link">
               Contact
             </a>
           </div>
@@ -296,73 +233,45 @@ export default async function JobDetailsPage({
 
         <main className="job-detail-page">
           <div className="container">
-
             {/* BACK */}
 
             <div className="job-detail-back">
-              <a href="/">
-                ← Back to jobs
-              </a>
+              <a href="/">← Back to jobs</a>
             </div>
 
             {/* JOB HEADER */}
 
             <section className="job-detail-header">
-
               <div className="job-detail-company-logo">
                 {job.logo ? (
-                  <img
-                    src={job.logo}
-                    alt={`${job.company} logo`}
-                  />
+                  <img src={job.logo} alt={`${job.company} logo`} />
                 ) : (
-                  job.company
-                    ?.charAt(0)
-                    ?.toUpperCase()
+                  job.company?.charAt(0)?.toUpperCase()
                 )}
               </div>
 
               <div className="job-detail-header-content">
+                <p className="job-company">{job.company}</p>
 
-                <p className="job-company">
-                  {job.company}
-                </p>
-
-                <h1>
-                  {job.title}
-                </h1>
+                <h1>{job.title}</h1>
 
                 <div className="job-detail-meta">
+                  <span>📍 {location}</span>
 
-                  <span>
-                    📍 {location}
-                  </span>
+                  <span>💼 {jobType}</span>
 
-                  <span>
-                    💼 {jobType}
-                  </span>
-
-                  <span>
-                    🎓 {experience}
-                  </span>
-
+                  <span>🎓 {experience}</span>
                 </div>
-
               </div>
-
             </section>
 
             {/* MAIN CONTENT */}
 
             <div className="job-detail-layout">
-
               {/* DESCRIPTION */}
 
               <article className="job-description">
-
-                <h2>
-                  Job Description
-                </h2>
+                <h2>Job Description</h2>
 
                 <div
                   dangerouslySetInnerHTML={{
@@ -371,185 +280,105 @@ export default async function JobDetailsPage({
                       "<p>Job description not available.</p>",
                   }}
                 />
-
               </article>
 
               {/* SIDEBAR */}
 
               <aside className="job-detail-sidebar">
-
                 {/* APPLY */}
 
                 <div className="job-apply-card">
+                  <h3>Interested in this job?</h3>
 
-                  <h3>
-                    Interested in this job?
-                  </h3>
-
-                  <p>
-                    Apply through the
-                    employer's application
-                    page.
-                  </p>
+                  <p>Apply through the employer's application page.</p>
 
                   {job.url && (
                     <a
-                      href={job.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={`/api/jobs/${encodeURIComponent(slug)}/apply`}
                       className="primary-button"
                     >
                       Apply Now →
                     </a>
                   )}
-
                 </div>
 
                 {/* JOB INFO */}
 
                 <div className="job-info-card">
-
-                  <h3>
-                    Job Information
-                  </h3>
+                  <h3>Job Information</h3>
 
                   <div className="job-info-row">
+                    <span>Company</span>
 
-                    <span>
-                      Company
-                    </span>
-
-                    <strong>
-                      {job.company}
-                    </strong>
-
+                    <strong>{job.company}</strong>
                   </div>
 
                   <div className="job-info-row">
+                    <span>Location</span>
 
-                    <span>
-                      Location
-                    </span>
-
-                    <strong>
-                      {location}
-                    </strong>
-
+                    <strong>{location}</strong>
                   </div>
 
                   <div className="job-info-row">
+                    <span>Job Type</span>
 
-                    <span>
-                      Job Type
-                    </span>
-
-                    <strong>
-                      {jobType}
-                    </strong>
-
+                    <strong>{jobType}</strong>
                   </div>
 
                   <div className="job-info-row">
+                    <span>Experience</span>
 
-                    <span>
-                      Experience
-                    </span>
-
-                    <strong>
-                      {experience}
-                    </strong>
-
+                    <strong>{experience}</strong>
                   </div>
 
                   <div className="job-info-row">
+                    <span>Salary</span>
 
-                    <span>
-                      Salary
-                    </span>
-
-                    <strong>
-                      {salary}
-                    </strong>
-
+                    <strong>{salary}</strong>
                   </div>
-
                 </div>
 
                 {/* SKILLS */}
 
                 {skills.length > 0 && (
                   <div className="job-info-card">
-
-                    <h3>
-                      Skills
-                    </h3>
+                    <h3>Skills</h3>
 
                     <div className="job-tags">
-
-                      {skills.map(
-                        (
-                          skill: string,
-                          index: number
-                        ) => (
-                          <span
-                            key={`${skill}-${index}`}
-                            className="job-tag"
-                          >
-                            {skill}
-                          </span>
-                        )
-                      )}
-
+                      {skills.map((skill: string, index: number) => (
+                        <span key={`${skill}-${index}`} className="job-tag">
+                          {skill}
+                        </span>
+                      ))}
                     </div>
-
                   </div>
                 )}
-
               </aside>
-
             </div>
-
           </div>
         </main>
 
         {/* FOOTER */}
 
         <footer className="site-footer">
-
           <div className="container">
-
             <div className="footer-contact">
+              <span className="footer-contact-label">Support</span>
 
-              <span className="footer-contact-label">
-                Support
-              </span>
-
-              <a
-                href="mailto:support@jobsearly.com"
-                className="footer-email"
-              >
+              <a href="mailto:support@jobsearly.com" className="footer-email">
                 support@jobsearly.com
               </a>
-
             </div>
 
             <div className="footer-bottom">
-              ©{" "}
-              {new Date().getFullYear()}{" "}
-              JobsEarly. All rights
-              reserved.
+              © {new Date().getFullYear()} JobsEarly. All rights reserved.
             </div>
-
           </div>
-
         </footer>
       </>
     );
   } catch (error) {
-    console.error(
-      "[JOB PAGE] Error:",
-      error
-    );
+    console.error("[JOB PAGE] Error:", error);
 
     notFound();
   }

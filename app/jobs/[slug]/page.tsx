@@ -1,359 +1,544 @@
 import { notFound } from "next/navigation";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 interface Job {
   id: string;
   slug: string;
   title: string;
   company: string;
-  logo: string;
+  logo: string | null;
   description: string;
+
   city: string | null;
   state: string | null;
   country: string;
-  job_type: string;
+
+  job_type: string | null;
+
   salary_min: number | null;
   salary_max: number | null;
   salary_curr: string | null;
-  exp_min: number;
-  exp_max: number;
-  exp_unit: string;
-  skills: string[];
-  posted_date: string;
-  url: string;
+
+  exp_min: number | null;
+  exp_max: number | null;
+  exp_unit: string | null;
+
+  skills: string | null;
+
+  posted_date: string | null;
+  url: string | null;
 }
 
-interface ApiResponse {
-  success: boolean;
-  data?: Job;
-  error?: string;
-}
-
-// ============================================================
-// GET SINGLE JOB
-// ============================================================
-
-async function getJob(
-  slug: string
-): Promise<Job | null> {
-  try {
-    let requestedSlug = slug;
-
-    try {
-      requestedSlug =
-        decodeURIComponent(slug);
-    } catch {
-      requestedSlug = slug;
-    }
-
-    /*
-     * Use the application's own API route.
-     *
-     * This route talks securely to Artha using
-     * ARTHA_API_KEY.
-     */
-
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      "https://jobsearly.dailyupdate.workers.dev";
-
-    const response = await fetch(
-      `${siteUrl}/api/jobs/${encodeURIComponent(
-        requestedSlug
-      )}`,
-      {
-        cache: "no-store",
-      }
-    );
-
-    if (!response.ok) {
-      console.error(
-        "Job detail API error:",
-        response.status
-      );
-
-      return null;
-    }
-
-    const result: ApiResponse =
-      await response.json();
-
-    if (
-      !result?.success ||
-      !result?.data
-    ) {
-      console.error(
-        "Invalid job detail response:",
-        result
-      );
-
-      return null;
-    }
-
-    return result.data;
-  } catch (error) {
-    console.error(
-      "Job details error:",
-      error
-    );
-
-    return null;
-  }
-}
-
-// ============================================================
-// JOB DETAILS PAGE
-// ============================================================
-
-export default async function JobDetailsPage({
-  params,
-}: {
+interface PageProps {
   params: Promise<{
     slug: string;
   }>;
-}) {
+}
+
+export const dynamic = "force-dynamic";
+
+export default async function JobDetailsPage({
+  params,
+}: PageProps) {
   const { slug } = await params;
 
-  const job = await getJob(slug);
+  console.log(
+    "======================================"
+  );
 
-  if (!job) {
-    notFound();
-  }
+  console.log(
+    "[JOB PAGE] Requested slug:",
+    slug
+  );
 
-  const location =
-    job.city ||
-    job.state ||
-    job.country ||
-    "India";
+  try {
+    const { env } =
+      await getCloudflareContext({
+        async: true,
+      });
 
-  const jobType =
-    job.job_type
-      ? job.job_type.replace(
-          /_/g,
-          " "
+    console.log(
+      "[JOB PAGE] Cloudflare context loaded"
+    );
+
+    const db = env.jobsearly_db;
+
+    if (!db) {
+      console.error(
+        "[JOB PAGE] D1 binding jobsearly_db is missing"
+      );
+
+      notFound();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | FIND JOB BY SLUG
+    |--------------------------------------------------------------------------
+    */
+
+    const result =
+      await db
+        .prepare(
+          `
+          SELECT
+            id,
+            slug,
+            title,
+            company,
+            logo,
+            description,
+            city,
+            state,
+            country,
+            job_type,
+            salary_min,
+            salary_max,
+            salary_curr,
+            exp_min,
+            exp_max,
+            exp_unit,
+            skills,
+            posted_date,
+            url
+          FROM jobs
+          WHERE slug = ?
+          LIMIT 1
+          `
         )
-      : "Full-Time";
+        .bind(slug)
+        .first<Job>();
 
-  const experience =
-    `${job.exp_min ?? 0} - ${
-      job.exp_max ?? 0
-    } ${job.exp_unit || "years"}`;
+    console.log(
+      "[JOB PAGE] Database result:",
+      result
+        ? {
+            id: result.id,
+            slug: result.slug,
+            title: result.title,
+            company: result.company,
+          }
+        : "NOT FOUND"
+    );
 
-  const salary =
-    job.salary_min != null &&
-    job.salary_max != null
-      ? `${job.salary_curr || "₹"} ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`
-      : "Not disclosed";
+    if (!result) {
+      console.error(
+        "[JOB PAGE] Job not found for slug:",
+        slug
+      );
 
-  return (
-    <main className="job-details-page">
-      <div className="container">
+      notFound();
+    }
 
-        {/* BACK */}
+    const job = result;
 
-        <a
-          href="/#jobs-section"
-          className="back-link"
-        >
-          ← Back to jobs
-        </a>
+    /*
+    |--------------------------------------------------------------------------
+    | PARSE SKILLS
+    |--------------------------------------------------------------------------
+    */
 
-        {/* JOB CARD */}
+    let skills: string[] = [];
 
-        <article className="job-details-card">
+    if (job.skills) {
+      try {
+        const parsed =
+          JSON.parse(job.skills);
 
-          {/* HEADER */}
+        if (Array.isArray(parsed)) {
+          skills = parsed;
+        } else {
+          skills = [String(parsed)];
+        }
+      } catch {
+        skills = job.skills
+          .split(",")
+          .map((skill) =>
+            skill.trim()
+          )
+          .filter(Boolean);
+      }
+    }
 
-          <div className="job-header">
+    /*
+    |--------------------------------------------------------------------------
+    | EXPERIENCE
+    |--------------------------------------------------------------------------
+    */
 
-            <div className="job-company-logo">
+    let experience =
+      "Experience not specified";
 
-              {job.logo ? (
-                <img
-                  src={job.logo}
-                  alt={`${job.company} logo`}
-                />
-              ) : (
-                <span>
-                  {job.company
-                    ?.charAt(0)
-                    ?.toUpperCase()}
-                </span>
-              )}
+    if (
+      job.exp_min != null &&
+      job.exp_max != null
+    ) {
+      experience = `${job.exp_min} - ${job.exp_max} ${
+        job.exp_unit || "years"
+      }`;
+    } else if (
+      job.exp_min != null
+    ) {
+      experience = `${job.exp_min}+ ${
+        job.exp_unit || "years"
+      }`;
+    } else if (
+      job.exp_max != null
+    ) {
+      experience = `Up to ${job.exp_max} ${
+        job.exp_unit || "years"
+      }`;
+    }
 
-            </div>
+    /*
+    |--------------------------------------------------------------------------
+    | JOB TYPE
+    |--------------------------------------------------------------------------
+    */
 
-            <div>
+    const jobType =
+      job.job_type
+        ? job.job_type.replace(
+            /_/g,
+            " "
+          )
+        : "Full-Time";
 
-              <h1>
-                {job.title}
-              </h1>
+    /*
+    |--------------------------------------------------------------------------
+    | LOCATION
+    |--------------------------------------------------------------------------
+    */
 
-              <p className="job-company">
-                {job.company}
-              </p>
+    const location =
+      job.city ||
+      job.state ||
+      job.country ||
+      "India";
 
-              <div className="job-meta">
+    /*
+    |--------------------------------------------------------------------------
+    | SALARY
+    |--------------------------------------------------------------------------
+    */
 
-                <span>
-                  📍 {location}
-                </span>
+    let salary =
+      "Salary not disclosed";
 
-                <span>
-                  💼 {jobType}
-                </span>
+    if (
+      job.salary_min != null &&
+      job.salary_max != null
+    ) {
+      salary = `${
+        job.salary_curr || "₹"
+      } ${job.salary_min.toLocaleString()} - ${
+        job.salary_max
+      .toLocaleString()}`;
+    } else if (
+      job.salary_min != null
+    ) {
+      salary = `${
+        job.salary_curr || "₹"
+      } ${job.salary_min.toLocaleString()}+`;
+    }
 
-                <span>
-                  🎓 {experience}
-                </span>
+    /*
+    |--------------------------------------------------------------------------
+    | PAGE
+    |--------------------------------------------------------------------------
+    */
 
-              </div>
+    return (
+      <>
+        {/* HEADER */}
 
-            </div>
-
-          </div>
-
-          {/* APPLY */}
-
-          <div className="job-apply-section">
-
-            <div>
-
-              <span className="apply-label">
-                Interested in this role?
-              </span>
-
-              <p>
-                Apply directly through
-                the original job posting.
-              </p>
-
-            </div>
+        <header className="site-header">
+          <div className="container navbar">
 
             <a
-              href={job.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="apply-button"
+              href="/"
+              className="logo"
             >
-              <span>
-                View & Apply
+              <span className="logo-mark">
+                J
               </span>
 
-              <span className="apply-arrow">
-                →
-              </span>
+              JobsEarly
+            </a>
+
+            <a
+              href="/#contact"
+              className="contact-link"
+            >
+              Contact
             </a>
 
           </div>
+        </header>
 
-          {/* DESCRIPTION */}
+        {/* JOB DETAILS */}
 
-          <div className="job-description">
+        <main className="job-detail-page">
 
-            <h2>
-              Job Description
-            </h2>
+          <div className="container">
 
-            <div
-              dangerouslySetInnerHTML={{
-                __html:
-                  job.description ||
-                  "<p>No description available.</p>",
-              }}
-            />
+            {/* BACK */}
 
-          </div>
+            <div className="job-detail-back">
+              <a href="/">
+                ← Back to jobs
+              </a>
+            </div>
 
-          {/* SKILLS */}
+            {/* JOB HEADER */}
 
-          {job.skills?.length > 0 && (
-            <div className="job-skills-section">
+            <section className="job-detail-header">
 
-              <h2>
-                Skills
-              </h2>
+              <div className="job-detail-company-logo">
 
-              <div className="job-tags">
-
-                {job.skills.map(
-                  (
-                    skill,
-                    index
-                  ) => (
-                    <span
-                      key={`${skill}-${index}`}
-                      className="job-tag"
-                    >
-                      {skill}
-                    </span>
-                  )
+                {job.logo ? (
+                  <img
+                    src={job.logo}
+                    alt={`${job.company} logo`}
+                  />
+                ) : (
+                  job.company
+                    ?.charAt(0)
+                    ?.toUpperCase()
                 )}
 
               </div>
 
-            </div>
-          )}
+              <div className="job-detail-header-content">
 
-          {/* EXTRA INFORMATION */}
+                <p className="job-company">
+                  {job.company}
+                </p>
 
-          <div className="job-extra-info">
+                <h1>
+                  {job.title}
+                </h1>
 
-            <div>
-              <span>
-                Salary
-              </span>
+                <div className="job-detail-meta">
 
-              <strong>
-                {salary}
-              </strong>
-            </div>
+                  <span>
+                    📍 {location}
+                  </span>
 
-            <div>
-              <span>
-                Experience
-              </span>
+                  <span>
+                    💼 {jobType}
+                  </span>
 
-              <strong>
-                {experience}
-              </strong>
-            </div>
+                  <span>
+                    🎓 {experience}
+                  </span>
 
-            <div>
-              <span>
-                Location
-              </span>
+                </div>
 
-              <strong>
-                {location}
-              </strong>
+              </div>
+
+            </section>
+
+            {/* MAIN CONTENT */}
+
+            <div className="job-detail-layout">
+
+              {/* DESCRIPTION */}
+
+              <article className="job-description">
+
+                <h2>
+                  Job Description
+                </h2>
+
+                <div
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      job.description ||
+                      "<p>Job description not available.</p>",
+                  }}
+                />
+
+              </article>
+
+              {/* SIDEBAR */}
+
+              <aside className="job-detail-sidebar">
+
+                {/* APPLY */}
+
+                <div className="job-apply-card">
+
+                  <h3>
+                    Interested in this job?
+                  </h3>
+
+                  <p>
+                    Apply through the
+                    employer's application
+                    page.
+                  </p>
+
+                  {job.url && (
+                    <a
+                      href={job.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="primary-button"
+                    >
+                      Apply Now →
+                    </a>
+                  )}
+
+                </div>
+
+                {/* JOB INFO */}
+
+                <div className="job-info-card">
+
+                  <h3>
+                    Job Information
+                  </h3>
+
+                  <div className="job-info-row">
+
+                    <span>
+                      Company
+                    </span>
+
+                    <strong>
+                      {job.company}
+                    </strong>
+
+                  </div>
+
+                  <div className="job-info-row">
+
+                    <span>
+                      Location
+                    </span>
+
+                    <strong>
+                      {location}
+                    </strong>
+
+                  </div>
+
+                  <div className="job-info-row">
+
+                    <span>
+                      Job Type
+                    </span>
+
+                    <strong>
+                      {jobType}
+                    </strong>
+
+                  </div>
+
+                  <div className="job-info-row">
+
+                    <span>
+                      Experience
+                    </span>
+
+                    <strong>
+                      {experience}
+                    </strong>
+
+                  </div>
+
+                  <div className="job-info-row">
+
+                    <span>
+                      Salary
+                    </span>
+
+                    <strong>
+                      {salary}
+                    </strong>
+
+                  </div>
+
+                </div>
+
+                {/* SKILLS */}
+
+                {skills.length > 0 && (
+                  <div className="job-info-card">
+
+                    <h3>
+                      Skills
+                    </h3>
+
+                    <div className="job-tags">
+
+                      {skills.map(
+                        (
+                          skill,
+                          index
+                        ) => (
+                          <span
+                            key={`${skill}-${index}`}
+                            className="job-tag"
+                          >
+                            {skill}
+                          </span>
+                        )
+                      )}
+
+                    </div>
+
+                  </div>
+                )}
+
+              </aside>
+
             </div>
 
           </div>
 
-          {/* BOTTOM APPLY */}
+        </main>
 
-          <div className="job-bottom-apply">
+        {/* FOOTER */}
 
-            <a
-              href={job.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="apply-button"
-            >
-              <span>
-                View & Apply
+        <footer className="site-footer">
+
+          <div className="container">
+
+            <div className="footer-contact">
+
+              <span className="footer-contact-label">
+                Support
               </span>
 
-              <span className="apply-arrow">
-                →
-              </span>
-            </a>
+              <a
+                href="mailto:support@jobsearly.com"
+                className="footer-email"
+              >
+                support@jobsearly.com
+              </a>
+
+            </div>
+
+            <div className="footer-bottom">
+              ©{" "}
+              {new Date().getFullYear()}{" "}
+              JobsEarly. All rights
+              reserved.
+            </div>
 
           </div>
 
-        </article>
+        </footer>
+      </>
+    );
+  } catch (error) {
+    console.error(
+      "[JOB PAGE] Error:",
+      error
+    );
 
-      </div>
-    </main>
-  );
+    notFound();
+  }
 }

@@ -1,79 +1,240 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+interface BackendJob {
+  id: string;
+  slug: string;
+  title: string;
+  company: string;
+  logo: string | null;
+  description: string;
+
+  city: string | null;
+  state: string | null;
+  country: string;
+
+  job_type: string | null;
+
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_curr: string | null;
+
+  exp_min: number | null;
+  exp_max: number | null;
+  exp_unit: string | null;
+
+  skills: string | null;
+
+  posted_date: string | null;
+  url: string | null;
+}
 
 interface Job {
   id: string;
   slug: string;
   title: string;
   company: string;
-  logo: string;
+  logo: string | null;
   description: string;
+
   city: string | null;
   state: string | null;
   country: string;
-  job_type: string;
+
+  job_type: string | null;
+
   salary_min: number | null;
   salary_max: number | null;
   salary_curr: string | null;
-  exp_min: number;
-  exp_max: number;
-  exp_unit: string;
+
+  exp_min: number | null;
+  exp_max: number | null;
+  exp_unit: string | null;
+
   skills: string[];
-  posted_date: string;
-  url: string;
+
+  posted_date: string | null;
+  url: string | null;
 }
 
 interface ApiResponse {
   success: boolean;
 
-  data: {
-    items: Job[];
-    total: number;
-    limit: number;
-    offset: number;
-    has_more: boolean;
-  };
+  jobs: BackendJob[];
 
-  message?: string;
+  total: number;
+
+  source?: string;
+
+  artha_total?: number;
+
+  artha_has_more?: boolean;
+
+  error?: string;
 }
 
 const JOBS_PER_PAGE = 10;
 
 export default function HomePage() {
-  const [allJobs, setAllJobs] = useState<Job[]>([]);
-  const [page, setPage] = useState(1);
+  const [
+    allJobs,
+    setAllJobs,
+  ] = useState<Job[]>([]);
 
-  const [search, setSearch] = useState("");
-  const [location, setLocation] = useState("IN");
+  const [
+    page,
+    setPage,
+  ] = useState(1);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [
+    search,
+    setSearch,
+  ] = useState("");
+
+  const [
+    location,
+    setLocation,
+  ] = useState("IN");
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
 
   /*
-   * LOAD JOBS
-   *
-   * The backend decides how many jobs are available.
-   *
-   * Example:
-   * 30 jobs -> allJobs contains 30
-   * 40 jobs -> allJobs contains 40
-   * 50 jobs -> allJobs contains 50
-   *
-   * We DO NOT slice the jobs here.
-   */
-  async function loadJobs(selectedLocation = location) {
+  |--------------------------------------------------------------------------
+  | CONVERT BACKEND JOB -> FRONTEND JOB
+  |--------------------------------------------------------------------------
+  */
+
+  function normalizeFrontendJob(
+    job: BackendJob
+  ): Job {
+    let skills: string[] = [];
+
+    if (Array.isArray(job.skills)) {
+      skills = job.skills;
+    } else if (
+      typeof job.skills === "string"
+    ) {
+      try {
+        const parsed =
+          JSON.parse(job.skills);
+
+        if (Array.isArray(parsed)) {
+          skills = parsed;
+        } else if (
+          typeof parsed === "string"
+        ) {
+          skills = [parsed];
+        }
+      } catch {
+        /*
+         * If skills is not JSON,
+         * treat it as comma-separated text.
+         */
+        skills = job.skills
+          .split(",")
+          .map((skill) =>
+            skill.trim()
+          )
+          .filter(Boolean);
+      }
+    }
+
+    return {
+      id: String(job.id ?? ""),
+      slug: String(job.slug ?? ""),
+      title: job.title ?? "",
+      company: job.company ?? "",
+      logo: job.logo ?? null,
+      description:
+        job.description ?? "",
+
+      city: job.city ?? null,
+      state: job.state ?? null,
+      country:
+        job.country ?? "IN",
+
+      job_type:
+        job.job_type ?? null,
+
+      salary_min:
+        job.salary_min ?? null,
+
+      salary_max:
+        job.salary_max ?? null,
+
+      salary_curr:
+        job.salary_curr ?? null,
+
+      exp_min:
+        job.exp_min ?? null,
+
+      exp_max:
+        job.exp_max ?? null,
+
+      exp_unit:
+        job.exp_unit ?? null,
+
+      skills,
+
+      posted_date:
+        job.posted_date ?? null,
+
+      url:
+        job.url ?? null,
+    };
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | LOAD JOBS
+  |--------------------------------------------------------------------------
+  */
+
+  async function loadJobs(
+    selectedLocation = location
+  ) {
     try {
       setLoading(true);
       setError("");
 
-      const response = await fetch(
-        `/api/jobs?location=${encodeURIComponent(
-          selectedLocation
-        )}`,
-        {
-          cache: "no-store",
-        }
+      console.log(
+        "======================================"
+      );
+
+      console.log(
+        "Loading jobs..."
+      );
+
+      console.log(
+        "Location:",
+        selectedLocation
+      );
+
+      const response =
+        await fetch(
+          `/api/jobs?location=${encodeURIComponent(
+            selectedLocation
+          )}`,
+          {
+            cache: "no-store",
+          }
+        );
+
+      console.log(
+        "API status:",
+        response.status
       );
 
       if (!response.ok) {
@@ -82,34 +243,126 @@ export default function HomePage() {
         );
       }
 
-      const result: ApiResponse =
-        await response.json();
+      const result =
+        (await response.json()) as ApiResponse;
+
+      /*
+      |--------------------------------------------------------------------------
+      | DEBUG
+      |--------------------------------------------------------------------------
+      */
+
+      console.log(
+        "FULL API RESPONSE:",
+        result
+      );
+
+      console.log(
+        "API success:",
+        result?.success
+      );
+
+      console.log(
+        "API jobs:",
+        result?.jobs
+      );
+
+      console.log(
+        "API jobs count:",
+        Array.isArray(
+          result?.jobs
+        )
+          ? result.jobs.length
+          : 0
+      );
+
+      console.log(
+        "API total:",
+        result?.total
+      );
+
+      console.log(
+        "API source:",
+        result?.source
+      );
+
+      console.log(
+        "Artha total:",
+        result?.artha_total
+      );
+
+      console.log(
+        "Artha has_more:",
+        result?.artha_has_more
+      );
+
+      /*
+      |--------------------------------------------------------------------------
+      | VALIDATE RESPONSE
+      |--------------------------------------------------------------------------
+      */
 
       if (
-        !result?.data?.items ||
-        !Array.isArray(result.data.items)
+        !result ||
+        result.success !== true
       ) {
         throw new Error(
-          "Invalid API response"
+          result?.error ||
+            "Backend returned success=false"
+        );
+      }
+
+      if (
+        !Array.isArray(
+          result.jobs
+        )
+      ) {
+        console.error(
+          "Expected result.jobs to be an array but received:",
+          result.jobs
+        );
+
+        throw new Error(
+          "Invalid API response: jobs array is missing"
         );
       }
 
       /*
-       * IMPORTANT
-       *
-       * Do NOT use:
-       *
-       * result.data.items.slice(0, 30)
-       *
-       * We keep ALL jobs returned by the backend.
-       */
-      setAllJobs(result.data.items);
+      |--------------------------------------------------------------------------
+      | NORMALIZE JOBS
+      |--------------------------------------------------------------------------
+      */
+
+      const normalizedJobs =
+        result.jobs.map(
+          normalizeFrontendJob
+        );
+
+      console.log(
+        "Normalized jobs:",
+        normalizedJobs.length
+      );
 
       /*
-       * Whenever jobs are reloaded,
-       * start from page 1.
-       */
+      |--------------------------------------------------------------------------
+      | SET JOBS
+      |--------------------------------------------------------------------------
+      */
+
+      setAllJobs(
+        normalizedJobs
+      );
+
       setPage(1);
+
+      console.log(
+        "Jobs successfully loaded:",
+        normalizedJobs.length
+      );
+
+      console.log(
+        "======================================"
+      );
     } catch (error) {
       console.error(
         "Jobs loading error:",
@@ -117,7 +370,9 @@ export default function HomePage() {
       );
 
       setError(
-        "Unable to load jobs. Please try again."
+        error instanceof Error
+          ? error.message
+          : "Unable to load jobs. Please try again."
       );
 
       setAllJobs([]);
@@ -127,40 +382,58 @@ export default function HomePage() {
   }
 
   /*
-   * INITIAL LOAD
-   */
+  |--------------------------------------------------------------------------
+  | INITIAL LOAD
+  |--------------------------------------------------------------------------
+  */
+
   useEffect(() => {
     loadJobs("IN");
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /*
-   * SEARCH
-   *
-   * Search through ALL loaded jobs.
-   */
-  const filteredJobs = allJobs.filter(
-    (job) => {
+  |--------------------------------------------------------------------------
+  | SEARCH
+  |--------------------------------------------------------------------------
+  */
+
+  const filteredJobs =
+    allJobs.filter((job) => {
       const query =
-        search.trim().toLowerCase();
+        search
+          .trim()
+          .toLowerCase();
 
       if (!query) {
         return true;
       }
 
       const title =
-        job.title?.toLowerCase() || "";
+        job.title
+          ?.toLowerCase() ||
+        "";
 
       const company =
-        job.company?.toLowerCase() || "";
+        job.company
+          ?.toLowerCase() ||
+        "";
 
       const city =
-        job.city?.toLowerCase() || "";
+        job.city
+          ?.toLowerCase() ||
+        "";
 
       const state =
-        job.state?.toLowerCase() || "";
+        job.state
+          ?.toLowerCase() ||
+        "";
 
       const country =
-        job.country?.toLowerCase() || "";
+        job.country
+          ?.toLowerCase() ||
+        "";
 
       const skills =
         job.skills || [];
@@ -171,43 +444,35 @@ export default function HomePage() {
         city.includes(query) ||
         state.includes(query) ||
         country.includes(query) ||
-        skills.some((skill) =>
-          skill
-            .toLowerCase()
-            .includes(query)
+        skills.some(
+          (skill) =>
+            skill
+              .toLowerCase()
+              .includes(query)
         )
       );
-    }
-  );
+    });
 
   /*
-   * DYNAMIC PAGINATION
-   *
-   * Examples:
-   *
-   * 30 jobs / 10 = 3 pages
-   * 40 jobs / 10 = 4 pages
-   * 50 jobs / 10 = 5 pages
-   * 41 jobs / 10 = 5 pages
-   */
-  const totalPages = Math.ceil(
-    filteredJobs.length /
-      JOBS_PER_PAGE
-  );
+  |--------------------------------------------------------------------------
+  | PAGINATION
+  |--------------------------------------------------------------------------
+  */
 
-  /*
-   * Protect page if filtering reduces
-   * the number of available pages.
-   */
+  const totalPages =
+    Math.ceil(
+      filteredJobs.length /
+        JOBS_PER_PAGE
+    );
+
   const safePage =
     totalPages > 0
-      ? Math.min(page, totalPages)
+      ? Math.min(
+          page,
+          totalPages
+        )
       : 1;
 
-  /*
-   * Calculate which jobs belong
-   * to the current page.
-   */
   const startIndex =
     (safePage - 1) *
     JOBS_PER_PAGE;
@@ -215,12 +480,16 @@ export default function HomePage() {
   const visibleJobs =
     filteredJobs.slice(
       startIndex,
-      startIndex + JOBS_PER_PAGE
+      startIndex +
+        JOBS_PER_PAGE
     );
 
   /*
-   * CHANGE PAGE
-   */
+  |--------------------------------------------------------------------------
+  | CHANGE PAGE
+  |--------------------------------------------------------------------------
+  */
+
   function changePage(
     newPage: number
   ) {
@@ -246,8 +515,11 @@ export default function HomePage() {
   }
 
   /*
-   * SEARCH BUTTON
-   */
+  |--------------------------------------------------------------------------
+  | SEARCH BUTTON
+  |--------------------------------------------------------------------------
+  */
+
   function handleSearch() {
     setPage(1);
 
@@ -264,23 +536,92 @@ export default function HomePage() {
   }
 
   /*
-   * LOCATION CHANGE
-   */
+  |--------------------------------------------------------------------------
+  | LOCATION
+  |--------------------------------------------------------------------------
+  */
+
   function handleLocationChange(
     newLocation: string
   ) {
-    setLocation(newLocation);
+    setLocation(
+      newLocation
+    );
+
     setSearch("");
     setPage(1);
 
-    loadJobs(newLocation);
+    loadJobs(
+      newLocation
+    );
   }
+
+  /*
+  |--------------------------------------------------------------------------
+  | EXPERIENCE FORMATTER
+  |--------------------------------------------------------------------------
+  */
+
+  function formatExperience(
+    job: Job
+  ) {
+    if (
+      job.exp_min != null &&
+      job.exp_max != null
+    ) {
+      return `${job.exp_min} - ${job.exp_max} ${
+        job.exp_unit ||
+        "years"
+      }`;
+    }
+
+    if (
+      job.exp_min != null
+    ) {
+      return `${job.exp_min}+ ${
+        job.exp_unit ||
+        "years"
+      }`;
+    }
+
+    if (
+      job.exp_max != null
+    ) {
+      return `Up to ${job.exp_max} ${
+        job.exp_unit ||
+        "years"
+      }`;
+    }
+
+    return "Experience not specified";
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | JOB TYPE FORMATTER
+  |--------------------------------------------------------------------------
+  */
+
+  function formatJobType(
+    job: Job
+  ) {
+    return job.job_type
+      ? job.job_type.replace(
+          /_/g,
+          " "
+        )
+      : "Full-Time";
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | RENDER
+  |--------------------------------------------------------------------------
+  */
 
   return (
     <>
-      {/* =========================
-          HEADER
-      ========================== */}
+      {/* HEADER */}
 
       <header className="site-header">
         <div className="container navbar">
@@ -304,14 +645,11 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* =========================
-          HERO
-      ========================== */}
+      {/* HERO */}
 
       <section className="hero">
         <div className="container">
           <div className="hero-content">
-
             <span className="hero-label">
               Career opportunities,
               simplified
@@ -326,16 +664,16 @@ export default function HomePage() {
 
             <p>
               Discover fresh job
-              opportunities from companies
-              across India. Search, explore
-              and apply to your next
-              opportunity without the noise.
+              opportunities from
+              companies across India.
+              Search, explore and apply
+              to your next opportunity
+              without the noise.
             </p>
 
             {/* SEARCH */}
 
             <div className="search-wrapper">
-
               <input
                 type="text"
                 className="search-input"
@@ -379,21 +717,17 @@ export default function HomePage() {
               >
                 Search Jobs
               </button>
-
             </div>
 
             <p className="search-example">
               Try: Software Engineer ·
               Java · Python · Amazon
             </p>
-
           </div>
         </div>
       </section>
 
-      {/* =========================
-          JOBS
-      ========================== */}
+      {/* JOBS */}
 
       <section
         id="jobs-section"
@@ -404,34 +738,27 @@ export default function HomePage() {
           {/* SECTION HEADER */}
 
           <div className="section-header">
-
             <div>
-
               <h2>
                 Latest jobs
               </h2>
 
               <p>
-                Fresh opportunities from
-                our job feed.
+                Fresh opportunities
+                from our job feed.
               </p>
-
             </div>
 
             <span className="job-count">
               {filteredJobs.length}{" "}
               jobs available
             </span>
-
           </div>
 
-          {/* =========================
-              LOADING
-          ========================== */}
+          {/* LOADING */}
 
           {loading && (
             <div className="jobs-grid">
-
               {Array.from({
                 length: 6,
               }).map(
@@ -442,46 +769,40 @@ export default function HomePage() {
                   />
                 )
               )}
-
             </div>
           )}
 
-          {/* =========================
-              ERROR
-          ========================== */}
+          {/* ERROR */}
 
-          {!loading && error && (
-            <div className="error-box">
+          {!loading &&
+            error && (
+              <div className="error-box">
+                <div className="error-icon">
+                  !
+                </div>
 
-              <div className="error-icon">
-                !
+                <h2>
+                  Something went wrong
+                </h2>
+
+                <p>
+                  {error}
+                </p>
+
+                <button
+                  className="primary-button"
+                  onClick={() =>
+                    loadJobs(
+                      location
+                    )
+                  }
+                >
+                  Try Again
+                </button>
               </div>
+            )}
 
-              <h2>
-                Something went wrong
-              </h2>
-
-              <p>
-                {error}
-              </p>
-
-              <button
-                className="primary-button"
-                onClick={() =>
-                  loadJobs(
-                    location
-                  )
-                }
-              >
-                Try Again
-              </button>
-
-            </div>
-          )}
-
-          {/* =========================
-              JOBS
-          ========================== */}
+          {/* JOBS */}
 
           {!loading &&
             !error && (
@@ -489,7 +810,6 @@ export default function HomePage() {
                 {visibleJobs.length ===
                 0 ? (
                   <div className="empty-box">
-
                     <div className="empty-icon">
                       ⌕
                     </div>
@@ -504,11 +824,9 @@ export default function HomePage() {
                       job title, location
                       or skill.
                     </p>
-
                   </div>
                 ) : (
                   <div className="jobs-grid">
-
                     {visibleJobs.map(
                       (job) => (
                         <article
@@ -519,17 +837,13 @@ export default function HomePage() {
                           {/* TOP */}
 
                           <div className="job-card-top">
-
                             <div className="company-logo">
-
                               {job.logo ? (
                                 <img
                                   src={
                                     job.logo
                                   }
-                                  alt={
-                                    job.company
-                                  }
+                                  alt={`${job.company} logo`}
                                 />
                               ) : (
                                 job.company
@@ -538,19 +852,16 @@ export default function HomePage() {
                                   )
                                   ?.toUpperCase()
                               )}
-
                             </div>
 
                             <span className="new-badge">
                               New
                             </span>
-
                           </div>
 
-                          {/* COMPANY + TITLE */}
+                          {/* COMPANY */}
 
                           <div>
-
                             <p className="job-company">
                               {
                                 job.company
@@ -562,15 +873,12 @@ export default function HomePage() {
                                 job.title
                               }
                             </h3>
-
                           </div>
 
                           {/* META */}
 
                           <div className="job-meta">
-
                             <div className="job-meta-item">
-
                               <span>
                                 📍
                               </span>
@@ -581,44 +889,31 @@ export default function HomePage() {
                                   job.country ||
                                   "India"}
                               </span>
-
                             </div>
 
                             <div className="job-meta-item">
-
                               <span>
                                 💼
                               </span>
 
                               <span>
-                                {job.job_type
-                                  ? job.job_type.replace(
-                                      /_/g,
-                                      " "
-                                    )
-                                  : "Full-Time"}
+                                {formatJobType(
+                                  job
+                                )}
                               </span>
-
                             </div>
 
                             <div className="job-meta-item">
-
                               <span>
                                 🎓
                               </span>
 
                               <span>
-                                {job.exp_min ??
-                                  0}{" "}
-                                -{" "}
-                                {job.exp_max ??
-                                  0}{" "}
-                                {job.exp_unit ||
-                                  "years"}
+                                {formatExperience(
+                                  job
+                                )}
                               </span>
-
                             </div>
-
                           </div>
 
                           {/* SKILLS */}
@@ -627,7 +922,6 @@ export default function HomePage() {
                             ?.length >
                             0 && (
                             <div className="job-tags">
-
                               {job.skills
                                 .slice(
                                   0,
@@ -648,16 +942,13 @@ export default function HomePage() {
                                     </span>
                                   )
                                 )}
-
                             </div>
                           )}
 
                           {/* FOOTER */}
 
                           <div className="job-card-footer">
-
                             <span className="job-salary">
-
                               {job.salary_min !=
                                 null &&
                               job.salary_max !=
@@ -667,7 +958,6 @@ export default function HomePage() {
                                     "₹"
                                   } ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`
                                 : "Salary not disclosed"}
-
                             </span>
 
                             <a
@@ -678,19 +968,15 @@ export default function HomePage() {
                             >
                               View Job →
                             </a>
-
                           </div>
 
                         </article>
                       )
                     )}
-
                   </div>
                 )}
 
-                {/* =========================
-                    PAGINATION
-                ========================== */}
+                {/* PAGINATION */}
 
                 {totalPages > 1 && (
                   <div className="pagination">
@@ -704,7 +990,8 @@ export default function HomePage() {
                         )
                       }
                       disabled={
-                        safePage === 1
+                        safePage ===
+                        1
                       }
                     >
                       ←
@@ -764,20 +1051,15 @@ export default function HomePage() {
 
                   </div>
                 )}
-
               </>
             )}
-
         </div>
       </section>
 
-      {/* =========================
-          CTA
-      ========================== */}
+      {/* CTA */}
 
       <section className="cta">
         <div className="container">
-
           <div className="cta-content">
 
             <span>
@@ -798,13 +1080,10 @@ export default function HomePage() {
             </p>
 
           </div>
-
         </div>
       </section>
 
-      {/* =========================
-          FOOTER
-      ========================== */}
+      {/* FOOTER */}
 
       <footer
         id="contact"
@@ -815,7 +1094,7 @@ export default function HomePage() {
           <div className="footer-contact">
 
             <span className="footer-contact-label">
-              
+              Support
             </span>
 
             <a

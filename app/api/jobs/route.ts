@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -291,172 +291,63 @@ async function saveJobs(
   db: D1Database,
   jobs: ArthaJob[]
 ) {
-  console.log(
-    "=============================================="
-  );
+  console.log("==============================================");
+  console.log("[D1] saveJobs() batch called");
+  console.log("[D1] Jobs received:", Array.isArray(jobs) ? jobs.length : 0);
+  console.log("==============================================");
 
-  console.log(
-    "[D1] saveJobs() called"
-  );
-
-  console.log(
-    "[D1] Jobs received:",
-    jobs.length
-  );
-
-  console.log(
-    "=============================================="
-  );
-
-  if (!Array.isArray(jobs)) {
-    console.error(
-      "[D1] ERROR: jobs is not an array:",
-      jobs
-    );
-
+  if (!Array.isArray(jobs) || jobs.length === 0) {
     return;
   }
 
-  let savedCount = 0;
-  let skippedCount = 0;
+  const statements: any[] = [];
 
-  for (
-    const rawJob of jobs
-  ) {
-    const job =
-      normalizeJob(rawJob);
+  for (const rawJob of jobs) {
+    const job = normalizeJob(rawJob);
+    if (!job) continue;
 
-    if (!job) {
-      skippedCount++;
+    const stmt = db.prepare(`
+      INSERT INTO jobs (
+        id, slug, title, company, logo, description, city, state, country,
+        job_type, salary_min, salary_max, salary_curr, exp_min, exp_max, exp_unit,
+        skills, posted_date, url
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(slug)
+      DO UPDATE SET
+        title = excluded.title,
+        company = excluded.company,
+        logo = excluded.logo,
+        description = excluded.description,
+        city = excluded.city,
+        state = excluded.state,
+        country = excluded.country,
+        job_type = excluded.job_type,
+        salary_min = excluded.salary_min,
+        salary_max = excluded.salary_max,
+        salary_curr = excluded.salary_curr,
+        exp_min = excluded.exp_min,
+        exp_max = excluded.exp_max,
+        exp_unit = excluded.exp_unit,
+        skills = excluded.skills,
+        posted_date = excluded.posted_date,
+        url = excluded.url,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(
+      job.id, job.slug, job.title, job.company, job.logo, job.description,
+      job.city, job.state, job.country, job.job_type, job.salary_min,
+      job.salary_max, job.salary_curr, job.exp_min, job.exp_max, job.exp_unit,
+      job.skills, job.posted_date, job.url
+    );
 
-      continue;
-    }
-
-    try {
-      await db
-        .prepare(
-          `
-          INSERT INTO jobs (
-            id,
-            slug,
-            title,
-            company,
-            logo,
-            description,
-            city,
-            state,
-            country,
-            job_type,
-            salary_min,
-            salary_max,
-            salary_curr,
-            exp_min,
-            exp_max,
-            exp_unit,
-            skills,
-            posted_date,
-            url
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-
-          ON CONFLICT(slug)
-          DO UPDATE SET
-            title = excluded.title,
-            company = excluded.company,
-            logo = excluded.logo,
-            description = excluded.description,
-            city = excluded.city,
-            state = excluded.state,
-            country = excluded.country,
-            job_type = excluded.job_type,
-            salary_min = excluded.salary_min,
-            salary_max = excluded.salary_max,
-            salary_curr = excluded.salary_curr,
-            exp_min = excluded.exp_min,
-            exp_max = excluded.exp_max,
-            exp_unit = excluded.exp_unit,
-            skills = excluded.skills,
-            posted_date = excluded.posted_date,
-            url = excluded.url,
-            updated_at = CURRENT_TIMESTAMP
-          `
-        )
-        .bind(
-          job.id,
-          job.slug,
-          job.title,
-          job.company,
-          job.logo,
-          job.description,
-          job.city,
-          job.state,
-          job.country,
-          job.job_type,
-          job.salary_min,
-          job.salary_max,
-          job.salary_curr,
-          job.exp_min,
-          job.exp_max,
-          job.exp_unit,
-          job.skills,
-          job.posted_date,
-          job.url
-        )
-        .run();
-
-      savedCount++;
-
-      /*
-       * Log only first few jobs to avoid flooding terminal.
-       */
-      if (savedCount <= 3) {
-        console.log(
-          `[D1] Saved job ${savedCount}:`,
-          {
-            id: job.id,
-            slug: job.slug,
-            title: job.title,
-            company: job.company,
-            country: job.country,
-          }
-        );
-      }
-    } catch (error) {
-      console.error(
-        "[D1] Failed to save job:",
-        {
-          id: job.id,
-          slug: job.slug,
-          title: job.title,
-        },
-        error
-      );
-
-      throw error;
-    }
+    statements.push(stmt);
   }
 
-  console.log(
-    "=============================================="
-  );
-
-  console.log(
-    "[D1] SAVE COMPLETE"
-  );
-
-  console.log(
-    "[D1] Saved:",
-    savedCount
-  );
-
-  console.log(
-    "[D1] Skipped:",
-    skippedCount
-  );
-
-  console.log(
-    "=============================================="
-  );
+  if (statements.length > 0) {
+    console.log(`[D1] Executing db.batch() for ${statements.length} jobs...`);
+    await db.batch(statements);
+    console.log("[D1] db.batch() save complete.");
+  }
 }
 
 /* =========================================================
@@ -1109,7 +1000,7 @@ export async function GET(
       Number(
         searchParams.get(
           "limit"
-        ) ?? "100"
+        ) ?? "10"
       );
 
     const limit =
@@ -1119,7 +1010,7 @@ export async function GET(
             requestedLimit
           )
             ? requestedLimit
-            : 100,
+            : 10,
           1
         ),
         100
@@ -1151,6 +1042,15 @@ export async function GET(
       }
     );
 
+    try {
+      await db.batch([
+        db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);`),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_jobs_country_date ON jobs(country, posted_date DESC);`)
+      ]);
+    } catch (idxErr) {
+      /* ignore if index already exists */
+    }
+
     /*
      * ----------------------------------------------------
      * STEP 1
@@ -1173,7 +1073,6 @@ export async function GET(
             title,
             company,
             logo,
-            description,
             city,
             state,
             country,
@@ -1364,7 +1263,6 @@ export async function GET(
             title,
             company,
             logo,
-            description,
             city,
             state,
             country,

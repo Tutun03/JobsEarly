@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useState,
@@ -84,6 +85,16 @@ export default function HomePage() {
     allJobs,
     setAllJobs,
   ] = useState<Job[]>([]);
+
+  const [
+    totalJobs,
+    setTotalJobs,
+  ] = useState(0);
+
+  const [
+    pageCache,
+    setPageCache,
+  ] = useState<Record<number, Job[]>>({});
 
   const [
     page,
@@ -203,178 +214,65 @@ export default function HomePage() {
   */
 
   async function loadJobs(
-    selectedLocation = location
+    targetPage = 1,
+    selectedLocation = location,
+    forceRefresh = false
   ) {
     try {
+      if (
+        !forceRefresh &&
+        pageCache[targetPage] &&
+        selectedLocation === location
+      ) {
+        console.log(`[CLIENT CACHE] Serving Page ${targetPage} from memory`);
+        setAllJobs(pageCache[targetPage]);
+        setPage(targetPage);
+        return;
+      }
+
       setLoading(true);
       setError("");
 
-      console.log(
-        "======================================"
-      );
+      const offset = (targetPage - 1) * JOBS_PER_PAGE;
 
-      console.log(
-        "Loading jobs..."
-      );
+      console.log(`[API] Fetching jobs page ${targetPage} (offset: ${offset}, limit: ${JOBS_PER_PAGE})...`);
 
-      console.log(
-        "Location:",
-        selectedLocation
-      );
-
-      const response =
-        await fetch(
-          `/api/jobs?location=${encodeURIComponent(
-            selectedLocation
-          )}`,
-          {
-            cache: "no-store",
-          }
-        );
-
-      console.log(
-        "API status:",
-        response.status
+      const response = await fetch(
+        `/api/jobs?location=${encodeURIComponent(
+          selectedLocation
+        )}&limit=${JOBS_PER_PAGE}&offset=${offset}`,
+        {
+          cache: "no-store",
+        }
       );
 
       if (!response.ok) {
-        throw new Error(
-          `Failed to fetch jobs: ${response.status}`
-        );
+        throw new Error(`Failed to fetch jobs: ${response.status}`);
       }
 
-      const result =
-        (await response.json()) as ApiResponse;
+      const result = (await response.json()) as ApiResponse;
 
-      /*
-      |--------------------------------------------------------------------------
-      | DEBUG
-      |--------------------------------------------------------------------------
-      */
-
-      console.log(
-        "FULL API RESPONSE:",
-        result
-      );
-
-      console.log(
-        "API success:",
-        result?.success
-      );
-
-      console.log(
-        "API jobs:",
-        result?.jobs
-      );
-
-      console.log(
-        "API jobs count:",
-        Array.isArray(
-          result?.jobs
-        )
-          ? result.jobs.length
-          : 0
-      );
-
-      console.log(
-        "API total:",
-        result?.total
-      );
-
-      console.log(
-        "API source:",
-        result?.source
-      );
-
-      console.log(
-        "Artha total:",
-        result?.artha_total
-      );
-
-      console.log(
-        "Artha has_more:",
-        result?.artha_has_more
-      );
-
-      /*
-      |--------------------------------------------------------------------------
-      | VALIDATE RESPONSE
-      |--------------------------------------------------------------------------
-      */
-
-      if (
-        !result ||
-        result.success !== true
-      ) {
-        throw new Error(
-          result?.error ||
-            "Backend returned success=false"
-        );
+      if (!result || result.success !== true || !Array.isArray(result.jobs)) {
+        throw new Error(result?.error || "Invalid API response: jobs array is missing");
       }
 
-      if (
-        !Array.isArray(
-          result.jobs
-        )
-      ) {
-        console.error(
-          "Expected result.jobs to be an array but received:",
-          result.jobs
-        );
+      const normalizedJobs = result.jobs.map(normalizeFrontendJob);
 
-        throw new Error(
-          "Invalid API response: jobs array is missing"
-        );
-      }
+      setPageCache((prev) => ({
+        ...prev,
+        [targetPage]: normalizedJobs,
+      }));
 
-      /*
-      |--------------------------------------------------------------------------
-      | NORMALIZE JOBS
-      |--------------------------------------------------------------------------
-      */
-
-      const normalizedJobs =
-        result.jobs.map(
-          normalizeFrontendJob
-        );
-
-      console.log(
-        "Normalized jobs:",
-        normalizedJobs.length
-      );
-
-      /*
-      |--------------------------------------------------------------------------
-      | SET JOBS
-      |--------------------------------------------------------------------------
-      */
-
-      setAllJobs(
-        normalizedJobs
-      );
-
-      setPage(1);
-
-      console.log(
-        "Jobs successfully loaded:",
-        normalizedJobs.length
-      );
-
-      console.log(
-        "======================================"
-      );
+      setAllJobs(normalizedJobs);
+      setTotalJobs(result.total ?? normalizedJobs.length);
+      setPage(targetPage);
     } catch (error) {
-      console.error(
-        "Jobs loading error:",
-        error
-      );
-
+      console.error("Jobs loading error:", error);
       setError(
         error instanceof Error
           ? error.message
           : "Unable to load jobs. Please try again."
       );
-
       setAllJobs([]);
     } finally {
       setLoading(false);
@@ -388,7 +286,7 @@ export default function HomePage() {
   */
 
   useEffect(() => {
-    loadJobs("IN");
+    loadJobs(1, "IN");
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -459,11 +357,10 @@ export default function HomePage() {
   |--------------------------------------------------------------------------
   */
 
-  const totalPages =
-    Math.ceil(
-      filteredJobs.length /
-        JOBS_PER_PAGE
-    );
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalJobs / JOBS_PER_PAGE)
+  );
 
   const safePage =
     totalPages > 0
@@ -473,16 +370,7 @@ export default function HomePage() {
         )
       : 1;
 
-  const startIndex =
-    (safePage - 1) *
-    JOBS_PER_PAGE;
-
-  const visibleJobs =
-    filteredJobs.slice(
-      startIndex,
-      startIndex +
-        JOBS_PER_PAGE
-    );
+  const visibleJobs = filteredJobs;
 
   /*
   |--------------------------------------------------------------------------
@@ -500,7 +388,7 @@ export default function HomePage() {
       return;
     }
 
-    setPage(newPage);
+    loadJobs(newPage, location);
 
     setTimeout(() => {
       document
@@ -551,9 +439,7 @@ export default function HomePage() {
     setSearch("");
     setPage(1);
 
-    loadJobs(
-      newLocation
-    );
+    loadJobs(1, newLocation, true);
   }
 
   /*
@@ -792,9 +678,7 @@ export default function HomePage() {
                 <button
                   className="primary-button"
                   onClick={() =>
-                    loadJobs(
-                      location
-                    )
+                    loadJobs(page, location, true)
                   }
                 >
                   Try Again
@@ -960,14 +844,14 @@ export default function HomePage() {
                                 : "Salary not disclosed"}
                             </span>
 
-                            <a
+                            <Link
                               href={`/jobs/${encodeURIComponent(
                                 job.slug
                               )}`}
                               className="view-job"
                             >
                               View Job →
-                            </a>
+                            </Link>
                           </div>
 
                         </article>

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 interface Job {
@@ -218,10 +219,10 @@ export default async function JobDetailsPage({ params }: PageProps) {
 
         <header className="site-header">
           <div className="container navbar">
-            <a href="/" className="logo">
+            <Link href="/" className="logo">
               <span className="logo-mark">J</span>
               JobsEarly
-            </a>
+            </Link>
 
             <a href="/#contact" className="contact-link">
               Contact
@@ -236,7 +237,7 @@ export default async function JobDetailsPage({ params }: PageProps) {
             {/* BACK */}
 
             <div className="job-detail-back">
-              <a href="/">← Back to jobs</a>
+              <Link href="/">← Back to jobs</Link>
             </div>
 
             {/* JOB HEADER */}

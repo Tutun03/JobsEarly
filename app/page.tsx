@@ -81,6 +81,45 @@ interface ApiResponse {
 
 const JOBS_PER_PAGE = 10;
 
+/* =========================================================
+   PAGINATION HELPER
+   ========================================================= */
+
+function getPaginationItems(
+  currentPage: number,
+  totalPages: number
+): (number | string)[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, "...", totalPages];
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [
+      1,
+      "...",
+      totalPages - 4,
+      totalPages - 3,
+      totalPages - 2,
+      totalPages - 1,
+      totalPages,
+    ];
+  }
+
+  return [
+    1,
+    "...",
+    currentPage - 1,
+    currentPage,
+    currentPage + 1,
+    "...",
+    totalPages,
+  ];
+}
+
 export default function HomePage() {
   const fetchingRef = useRef<string | null>(null);
   const [
@@ -877,37 +916,17 @@ export default function HomePage() {
 
                     {/* PAGE NUMBERS */}
 
-                    {Array.from(
-                      {
-                        length:
-                          totalPages,
-                      },
-                      (_, index) =>
-                        index + 1
-                    ).map(
-                      (
-                        pageNumber
-                      ) => (
+                    {getPaginationItems(safePage, totalPages).map((item, index) =>
+                      typeof item === "number" ? (
                         <button
-                          key={
-                            pageNumber
-                          }
-                          onClick={() =>
-                            changePage(
-                              pageNumber
-                            )
-                          }
-                          className={
-                            safePage ===
-                            pageNumber
-                              ? "active"
-                              : ""
-                          }
+                          key={`page-${item}`}
+                          onClick={() => changePage(item)}
+                          className={safePage === item ? "active" : ""}
                         >
-                          {
-                            pageNumber
-                          }
+                          {item}
                         </button>
+                      ) : (
+                        <span key={`ellipsis-${index}`}>...</span>
                       )
                     )}
 

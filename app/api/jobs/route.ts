@@ -915,7 +915,11 @@ export async function GET(request: NextRequest) {
     const requestedOffset = Number(searchParams.get("offset") ?? "0");
     const offset = Math.max(Number.isFinite(requestedOffset) ? requestedOffset : 0, 0);
 
-    const searchQuery = searchParams.get("search")?.trim() ?? "";
+    /*
+     * ----------------------------------------------------
+     * D1 ..
+     * ----------------------------------------------------
+     */
 
     console.log(`[API] GET /api/jobs: location=${location}, limit=${limit}, offset=${offset}, search="${searchQuery}"`);
 

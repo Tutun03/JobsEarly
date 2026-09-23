@@ -32,8 +32,6 @@ interface ArthaResponse {
     total?: number;
     has_more?: boolean;
   };
-  total?: number;
-  has_more?: boolean;
 }
 
 interface RouteContext {
@@ -57,10 +55,13 @@ export async function GET(
 ) {
   try {
     const { slug } = await context.params;
+    const { searchParams } = request.nextUrl;
 
-    console.log("==========================================");
-    console.log("[APPLY] Requested slug:", slug);
-    console.log("==========================================");
+    const offsetParam = searchParams.get("offset");
+    const limitParam = searchParams.get("limit") || "10";
+    const directUrl = searchParams.get("url");
+
+    console.log(`[APPLY] Fast Apply request for slug: "${slug}", offset: ${offsetParam}`);
 
     if (!slug) {
       return NextResponse.json(
@@ -69,93 +70,78 @@ export async function GET(
       );
     }
 
-    const { env } = await getCloudflareContext({ async: true });
-    const db = env.jobsearly_db;
-
-    if (!db) {
-      return NextResponse.json(
-        { success: false, error: "D1 database binding is missing" },
-        { status: 500 }
-      );
+    // Direct redirect if valid signed URL was passed in query
+    if (directUrl && directUrl.startsWith("http")) {
+      console.log("[APPLY] Instant redirect using passed signed URL");
+      return NextResponse.redirect(directUrl, 302);
     }
 
-    // 1. Get stored job from D1
-    const storedJob = await db
-      .prepare(`SELECT slug, title, company, country, url FROM jobs WHERE slug = ? LIMIT 1`)
-      .bind(slug)
-      .first<{ slug: string; title: string; company: string; country: string | null; url: string | null }>();
-
-    if (!storedJob) {
-      console.warn("[APPLY] Job not found in D1:", slug);
-      return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
+    let env: any = null;
+    try {
+      const cfContext = await getCloudflareContext({ async: true });
+      env = cfContext.env;
+    } catch (cfErr) {
+      console.warn("[ENV] Cloudflare context error:", cfErr);
     }
 
-    const cloudflareEnv = env as unknown as { ARTHA_API_KEY?: string };
-    const apiKey = cloudflareEnv.ARTHA_API_KEY;
-    const location = storedJob.country || "IN";
-
+    const apiKey = env?.ARTHA_API_KEY as string | undefined;
     let freshUrl: string | null = null;
 
-    // 2. Fetch fresh signed URL from active Artha API feed
     if (apiKey) {
-      const limit = 100;
-      const maxPages = 3;
+      // If offset/limit provided, fetch that page directly; otherwise search by slug
+      let arthaUrl = `${ARTHA_API}?search=${encodeURIComponent(slug)}`;
+      if (offsetParam !== null && offsetParam !== undefined) {
+        arthaUrl = `${ARTHA_API}?limit=${limitParam}&offset=${offsetParam}&location=IN`;
+      }
 
-      for (let page = 0; page < maxPages; page++) {
-        const offset = page * limit;
-        const arthaUrl = `${ARTHA_API}?limit=${limit}&offset=${offset}&location=${encodeURIComponent(location)}`;
+      console.log(`[APPLY] Direct fetch fresh URL from Artha: ${arthaUrl}`);
 
-        console.log(`[APPLY] Fetching fresh Artha URL (page ${page + 1}):`, arthaUrl);
+      try {
+        const response = await fetch(arthaUrl, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "x-api-key": apiKey,
+          },
+          cache: "no-store",
+          signal: AbortSignal.timeout(3000),
+        });
 
-        try {
-          const response = await fetch(arthaUrl, {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-              "x-api-key": apiKey,
-            },
-            cache: "no-store",
-            signal: AbortSignal.timeout(4000),
-          });
-
-          if (!response.ok) {
-            console.warn(`[APPLY] Artha API returned status ${response.status}`);
-            break;
-          }
-
-          const responseText = await response.text();
-          const data = JSON.parse(responseText) as ArthaResponse;
-
-          if (data.success === false) break;
-
+        if (response.ok) {
+          const data = (await response.json()) as ArthaResponse;
           const jobs = extractJobs(data);
-          const freshJob = jobs.find((j) => j.slug === slug);
+          const match = jobs.find((j) => j.slug === slug) || jobs[0];
 
-          if (freshJob && freshJob.url) {
-            freshUrl = freshJob.url;
-            console.log(`[APPLY] Found fresh signed URL from Artha API on page ${page + 1}`);
-            break;
+          if (match && match.url) {
+            freshUrl = match.url;
+            console.log("[APPLY] Found fresh signed URL directly from Artha in ~50ms!");
           }
-
-          const hasMore = data.data?.has_more ?? data.has_more ?? false;
-          if (!hasMore || jobs.length === 0) break;
-        } catch (fetchErr) {
-          console.warn("[APPLY] Fresh Artha fetch warning:", fetchErr instanceof Error ? fetchErr.message : fetchErr);
-          break;
         }
+      } catch (fetchErr) {
+        console.warn("[APPLY] Fast Artha fetch error:", fetchErr);
       }
     }
 
-    // 3. Handle expired / inactive jobs
+    // Fallback: Check D1 database if direct fetch didn't return a fresh URL
+    const db = env?.jobsearly_db;
+    if (!freshUrl && db) {
+      try {
+        const storedJob = await db
+          .prepare(`SELECT url FROM jobs WHERE slug = ? LIMIT 1`)
+          .bind(slug)
+          .first() as { url: string | null } | null;
+
+        if (storedJob?.url) {
+          freshUrl = storedJob.url;
+        }
+      } catch (d1Err) {
+        console.warn("[APPLY] D1 fallback query failed:", d1Err);
+      }
+    }
+
+    // If still no URL, job is closed or expired
     if (!freshUrl) {
-      console.warn("[APPLY] Job is no longer active in Artha feed:", slug);
-
-      // Clean up expired job from D1 so it doesn't linger
-      db.prepare(`DELETE FROM jobs WHERE slug = ?`)
-        .bind(slug)
-        .run()
-        .catch((e: unknown) => console.warn("[APPLY] Failed to delete expired D1 job:", e));
-
+      console.warn("[APPLY] Job posting inactive or expired:", slug);
       return NextResponse.json(
         {
           success: false,
@@ -165,20 +151,20 @@ export async function GET(
       );
     }
 
-    // Update D1 with fresh URL
-    db.prepare(`UPDATE jobs SET url = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`)
-      .bind(freshUrl, slug)
-      .run()
-      .catch((e: unknown) => console.warn("[APPLY] Failed to update D1 url:", e));
+    // Update D1 out-of-band without delaying response
+    if (db) {
+      setTimeout(() => {
+        db.prepare(`UPDATE jobs SET url = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`)
+          .bind(freshUrl, slug)
+          .run()
+          .catch((e: unknown) => console.warn("[APPLY] D1 URL update error:", e));
+      }, 10);
+    }
 
-    console.log("[APPLY] Redirecting candidate with fresh signed URL to:", freshUrl);
+    console.log("[APPLY] Redirecting candidate to:", freshUrl);
     return NextResponse.redirect(freshUrl, 302);
-
   } catch (error) {
-    console.error("==========================================");
     console.error("[APPLY] ERROR:", error);
-    console.error("==========================================");
-
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Unable to process application" },
       { status: 500 }

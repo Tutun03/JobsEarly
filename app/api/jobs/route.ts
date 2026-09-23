@@ -287,66 +287,79 @@ function normalizeJob(
    SAVE JOBS TO D1
    ========================================================= */
 
+const recentSaveKeys = new Set<string>();
+
 async function saveJobs(
   db: D1Database,
   jobs: ArthaJob[]
 ) {
-  console.log("==============================================");
-  console.log("[D1] saveJobs() batch called");
-  console.log("[D1] Jobs received:", Array.isArray(jobs) ? jobs.length : 0);
-  console.log("==============================================");
-
   if (!Array.isArray(jobs) || jobs.length === 0) {
     return;
   }
 
-  const statements: any[] = [];
-
-  for (const rawJob of jobs) {
-    const job = normalizeJob(rawJob);
-    if (!job) continue;
-
-    const stmt = db.prepare(`
-      INSERT INTO jobs (
-        id, slug, title, company, logo, description, city, state, country,
-        job_type, salary_min, salary_max, salary_curr, exp_min, exp_max, exp_unit,
-        skills, posted_date, url
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(slug)
-      DO UPDATE SET
-        title = excluded.title,
-        company = excluded.company,
-        logo = excluded.logo,
-        description = excluded.description,
-        city = excluded.city,
-        state = excluded.state,
-        country = excluded.country,
-        job_type = excluded.job_type,
-        salary_min = excluded.salary_min,
-        salary_max = excluded.salary_max,
-        salary_curr = excluded.salary_curr,
-        exp_min = excluded.exp_min,
-        exp_max = excluded.exp_max,
-        exp_unit = excluded.exp_unit,
-        skills = excluded.skills,
-        posted_date = excluded.posted_date,
-        url = excluded.url,
-        updated_at = CURRENT_TIMESTAMP
-    `).bind(
-      job.id, job.slug, job.title, job.company, job.logo, job.description,
-      job.city, job.state, job.country, job.job_type, job.salary_min,
-      job.salary_max, job.salary_curr, job.exp_min, job.exp_max, job.exp_unit,
-      job.skills, job.posted_date, job.url
-    );
-
-    statements.push(stmt);
+  const batchKey = `${jobs[0]?.slug}_${jobs[jobs.length - 1]?.slug}`;
+  if (recentSaveKeys.has(batchKey)) {
+    return;
   }
+  recentSaveKeys.add(batchKey);
+  setTimeout(() => recentSaveKeys.delete(batchKey), 30000);
 
-  if (statements.length > 0) {
-    console.log(`[D1] Executing db.batch() for ${statements.length} jobs...`);
-    await db.batch(statements);
-    console.log("[D1] db.batch() save complete.");
+  try {
+    const statements: any[] = [];
+
+    for (const rawJob of jobs) {
+      const job = normalizeJob(rawJob);
+      if (!job) continue;
+
+      const stmt = db.prepare(`
+        INSERT INTO jobs (
+          id, slug, title, company, logo, description, city, state, country,
+          job_type, salary_min, salary_max, salary_curr, exp_min, exp_max, exp_unit,
+          skills, posted_date, url
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(slug)
+        DO UPDATE SET
+          title = excluded.title,
+          company = excluded.company,
+          logo = excluded.logo,
+          description = excluded.description,
+          city = excluded.city,
+          state = excluded.state,
+          country = excluded.country,
+          job_type = excluded.job_type,
+          salary_min = excluded.salary_min,
+          salary_max = excluded.salary_max,
+          salary_curr = excluded.salary_curr,
+          exp_min = excluded.exp_min,
+          exp_max = excluded.exp_max,
+          exp_unit = excluded.exp_unit,
+          skills = excluded.skills,
+          posted_date = excluded.posted_date,
+          url = excluded.url,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(
+        job.id, job.slug, job.title, job.company, job.logo, job.description,
+        job.city, job.state, job.country, job.job_type, job.salary_min,
+        job.salary_max, job.salary_curr, job.exp_min, job.exp_max, job.exp_unit,
+        job.skills, job.posted_date, job.url
+      );
+
+      statements.push(stmt);
+    }
+
+    // Process in small batches of 10 to avoid remote D1 socket lock timeouts
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < statements.length; i += BATCH_SIZE) {
+      const chunk = statements.slice(i, i + BATCH_SIZE);
+      try {
+        await db.batch(chunk);
+      } catch (chunkErr) {
+        console.warn(`[D1] Warning: Background batch save chunk ${i} failed (non-fatal):`, chunkErr);
+      }
+    }
+  } catch (err) {
+    console.warn("[D1] Warning: Background saveJobs failed (non-fatal):", err);
   }
 }
 
@@ -583,14 +596,19 @@ async function getJobsFromArtha(
   apiKey: string,
   location: string,
   limit: number,
-  offset: number
+  offset: number,
+  search?: string
 ) {
-  const url =
+  let url =
     `${ARTHA_API}?limit=${limit}` +
     `&offset=${offset}` +
     `&location=${encodeURIComponent(
       location
     )}`;
+
+  if (search && search.trim()) {
+    url += `&search=${encodeURIComponent(search.trim())}`;
+  }
 
   console.log(
     "=============================================="
@@ -630,20 +648,28 @@ async function getJobsFromArtha(
     );
   }
 
-  const response =
-    await fetch(url, {
+  let response: Response;
+  try {
+    response = await fetch(url, {
       method: "GET",
-
       headers: {
-        Accept:
-          "application/json",
-
-        "x-api-key":
-          apiKey,
+        Accept: "application/json",
+        "x-api-key": apiKey,
       },
-
       cache: "no-store",
     });
+  } catch (firstErr) {
+    console.warn("[ARTHA] Fetch attempt 1 failed, retrying in 300ms...", firstErr);
+    await new Promise((r) => setTimeout(r, 300));
+    response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "x-api-key": apiKey,
+      },
+      cache: "no-store",
+    });
+  }
 
   console.log(
     "[ARTHA] HTTP status:",
@@ -878,551 +904,117 @@ async function getJobsFromArtha(
    GET /api/jobs
    ========================================================= */
 
-export async function GET(
-  request: NextRequest
-) {
+export async function GET(request: NextRequest) {
   try {
-    console.log(
-      "\n\n=============================================="
-    );
+    const { searchParams } = request.nextUrl;
 
-    console.log(
-      "[API] GET /api/jobs START"
-    );
+    const location = searchParams.get("location") ?? "IN";
+    const requestedLimit = Number(searchParams.get("limit") ?? "10");
+    const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 10, 1), 100);
 
-    console.log(
-      "=============================================="
-    );
+    const requestedOffset = Number(searchParams.get("offset") ?? "0");
+    const offset = Math.max(Number.isFinite(requestedOffset) ? requestedOffset : 0, 0);
 
-    /*
-     * ----------------------------------------------------
-     * CLOUDFLARE ENVIRONMENT
-     * ----------------------------------------------------
-     */
+    const searchQuery = searchParams.get("search")?.trim() ?? "";
 
-    const { env } =
-      await getCloudflareContext({
-        async: true,
-      });
+    console.log(`[API] GET /api/jobs: location=${location}, limit=${limit}, offset=${offset}, search="${searchQuery}"`);
 
-    console.log(
-      "[ENV] Cloudflare context loaded"
-    );
-
-    /*
-     * ----------------------------------------------------
-     * D1
-     * ----------------------------------------------------
-     */
-
-    const db =
-      env.jobsearly_db;
-
-    if (!db) {
-      console.error(
-        "[D1] jobsearly_db binding is missing"
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-
-          error:
-            "D1 database binding is missing",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    console.log(
-      "[D1] jobsearly_db binding found"
-    );
-
-    /*
-     * ----------------------------------------------------
-     * ARTHA API KEY
-     * ----------------------------------------------------
-     *
-     * CloudflareEnv does not necessarily contain
-     * our custom variable in TypeScript.
-     *
-     * Therefore we safely cast it.
-     * ----------------------------------------------------
-     */
-
-    const cloudflareEnv =
-      env as unknown as {
-        ARTHA_API_KEY?: string;
-      };
-
-    const apiKey =
-      cloudflareEnv.ARTHA_API_KEY;
-
-    if (!apiKey) {
-      console.error(
-        "[ENV] ARTHA_API_KEY is missing"
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-
-          error:
-            "ARTHA_API_KEY is missing from Cloudflare environment",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    console.log(
-      "[ENV] ARTHA_API_KEY found"
-    );
-
-    /*
-     * ----------------------------------------------------
-     * QUERY PARAMETERS
-     * ----------------------------------------------------
-     */
-
-    const searchParams =
-      request.nextUrl.searchParams;
-
-    const location =
-      searchParams.get(
-        "location"
-      ) ?? "IN";
-
-    const requestedLimit =
-      Number(
-        searchParams.get(
-          "limit"
-        ) ?? "10"
-      );
-
-    const limit =
-      Math.min(
-        Math.max(
-          Number.isFinite(
-            requestedLimit
-          )
-            ? requestedLimit
-            : 10,
-          1
-        ),
-        100
-      );
-
-    const requestedOffset =
-      Number(
-        searchParams.get(
-          "offset"
-        ) ?? "0"
-      );
-
-    const offset =
-      Math.max(
-        Number.isFinite(
-          requestedOffset
-        )
-          ? requestedOffset
-          : 0,
-        0
-      );
-
-    console.log(
-      "[API] Query:",
-      {
-        location,
-        limit,
-        offset,
-      }
-    );
+    let env: any = null;
+    let ctx: any = null;
 
     try {
-      await db.batch([
-        db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);`),
-        db.prepare(`CREATE INDEX IF NOT EXISTS idx_jobs_country_date ON jobs(country, posted_date DESC);`)
-      ]);
-    } catch (idxErr) {
-      /* ignore if index already exists */
+      const cfContext = await getCloudflareContext({ async: true });
+      env = cfContext.env;
+      ctx = cfContext.ctx;
+    } catch (cfErr) {
+      console.warn("[ENV] Could not load Cloudflare context:", cfErr);
+    }
+
+    const db = env?.jobsearly_db as D1Database | undefined;
+    const apiKey = (env as any)?.ARTHA_API_KEY as string | undefined;
+
+    if (!apiKey) {
+      console.error("[ENV] ARTHA_API_KEY is missing");
+      return NextResponse.json(
+        { success: false, error: "ARTHA_API_KEY is missing from Cloudflare environment" },
+        { status: 500 }
+      );
     }
 
     /*
-     * ----------------------------------------------------
-     * STEP 1
-     *
-     * READ EXISTING D1 JOBS
-     * ----------------------------------------------------
+     * Direct Fetch from Artha API (Super Fast ~100ms)
      */
+    try {
+      console.log(`[API] Direct fetch from Artha API (limit=${limit}, offset=${offset}, search="${searchQuery}")...`);
+      const artha = await getJobsFromArtha(apiKey, location, limit, offset, searchQuery);
 
-    console.log(
-      "[D1] Checking cached jobs..."
-    );
+      const normalizedJobs = artha.jobs
+        .map(normalizeJob)
+        .filter((j): j is NormalizedJob => j !== null);
 
-    const cached =
-      await db
-        .prepare(
-          `
-          SELECT
-            id,
-            slug,
-            title,
-            company,
-            logo,
-            city,
-            state,
-            country,
-            job_type,
-            salary_min,
-            salary_max,
-            salary_curr,
-            exp_min,
-            exp_max,
-            exp_unit,
-            skills,
-            posted_date,
-            url
-          FROM jobs
-          WHERE country = ?
-          ORDER BY
-            CASE
-              WHEN posted_date IS NULL THEN 1
-              ELSE 0
-            END,
-            posted_date DESC
-          LIMIT ? OFFSET ?
-          `
-        )
-        .bind(
-          location,
-          limit,
-          offset
-        )
-        .all();
+      // Fire-and-forget background save to D1 without blocking HTTP response
+      if (db && artha.jobs.length > 0) {
+        setTimeout(() => {
+          saveJobs(db, artha.jobs).catch((err) =>
+            console.warn("[D1] Background saveJobs error:", err)
+          );
+        }, 10);
+      }
 
-    const cachedJobs =
-      cached.results ??
-      [];
-
-    console.log(
-      "[D1] Cached jobs returned:",
-      cachedJobs.length
-    );
-
-    /*
-     * ----------------------------------------------------
-     * STEP 2
-     *
-     * COUNT STORED JOBS
-     * ----------------------------------------------------
-     */
-
-    const countResult =
-      await db
-        .prepare(
-          `
-          SELECT COUNT(*) AS count
-          FROM jobs
-          WHERE country = ?
-          `
-        )
-        .bind(
-          location
-        )
-        .first<{
-          count: number;
-        }>();
-
-    const storedTotal =
-      Number(
-        countResult?.count ??
-          0
-      );
-
-    console.log(
-      "[D1] Stored total:",
-      storedTotal
-    );
-
-    /*
-     * ----------------------------------------------------
-     * STEP 3
-     *
-     * RETURN CACHE IF ENOUGH DATA EXISTS
-     * ----------------------------------------------------
-     */
-
-    if (
-      cachedJobs.length > 0 &&
-      offset +
-        cachedJobs.length <=
-        storedTotal
-    ) {
-      console.log(
-        "[D1] Returning jobs from D1"
-      );
-
-      console.log(
-        "[API] Returning:",
-        cachedJobs.length,
-        "jobs"
-      );
+      console.log(`[API] Fast response returning ${normalizedJobs.length} jobs (Total: ${artha.total})`);
 
       return NextResponse.json({
         success: true,
-
-        jobs:
-          cachedJobs,
-
-        total:
-          storedTotal,
-
-        source:
-          "d1",
+        jobs: normalizedJobs,
+        total: artha.total,
+        has_more: artha.has_more,
+        source: "artha_direct",
       });
+    } catch (arthaErr) {
+      console.warn("[API] Artha API direct fetch failed, attempting D1 fallback...", arthaErr);
+
+      if (db) {
+        const cached = await db
+          .prepare(
+            `
+            SELECT id, slug, title, company, logo, city, state, country, job_type,
+                   salary_min, salary_max, salary_curr, exp_min, exp_max, exp_unit,
+                   skills, posted_date, url
+            FROM jobs
+            WHERE country = ?
+            ORDER BY CASE WHEN posted_date IS NULL THEN 1 ELSE 0 END, posted_date DESC
+            LIMIT ? OFFSET ?
+            `
+          )
+          .bind(location, limit, offset)
+          .all();
+
+        const countResult = await db
+          .prepare(`SELECT COUNT(*) AS count FROM jobs WHERE country = ?`)
+          .bind(location)
+          .first<{ count: number }>();
+
+        const cachedJobs = cached.results ?? [];
+        const total = Number(countResult?.count ?? 0);
+
+        return NextResponse.json({
+          success: true,
+          jobs: cachedJobs,
+          total,
+          source: "d1_fallback",
+        });
+      }
+
+      throw arthaErr;
     }
-
-    /*
-     * ----------------------------------------------------
-     * STEP 4
-     *
-     * FETCH FROM ARTHA
-     * ----------------------------------------------------
-     */
-
-    console.log(
-      "[API] D1 does not contain enough jobs."
-    );
-
-    console.log(
-      "[API] Fetching from Artha..."
-    );
-
-    const artha =
-      await getJobsFromArtha(
-        apiKey,
-        location,
-        100,
-        offset
-      );
-
-    /*
-     * ----------------------------------------------------
-     * STEP 5
-     *
-     * SAVE TO D1
-     * ----------------------------------------------------
-     */
-
-    if (
-      artha.jobs.length > 0
-    ) {
-      console.log(
-        "[D1] Saving",
-        artha.jobs.length,
-        "jobs..."
-      );
-
-      await saveJobs(
-        db,
-        artha.jobs
-      );
-    } else {
-      console.warn(
-        "[D1] Artha returned 0 jobs."
-      );
-
-      console.warn(
-        "[D1] Nothing to save."
-      );
-    }
-
-    /*
-     * ----------------------------------------------------
-     * STEP 6
-     *
-     * READ D1 AGAIN
-     * ----------------------------------------------------
-     */
-
-    console.log(
-      "[D1] Reading final records..."
-    );
-
-    const finalResult =
-      await db
-        .prepare(
-          `
-          SELECT
-            id,
-            slug,
-            title,
-            company,
-            logo,
-            city,
-            state,
-            country,
-            job_type,
-            salary_min,
-            salary_max,
-            salary_curr,
-            exp_min,
-            exp_max,
-            exp_unit,
-            skills,
-            posted_date,
-            url
-          FROM jobs
-          WHERE country = ?
-          ORDER BY
-            CASE
-              WHEN posted_date IS NULL THEN 1
-              ELSE 0
-            END,
-            posted_date DESC
-          LIMIT ? OFFSET ?
-          `
-        )
-        .bind(
-          location,
-          limit,
-          offset
-        )
-        .all();
-
-    const finalJobs =
-      finalResult.results ??
-      [];
-
-    console.log(
-      "[D1] Final jobs returned:",
-      finalJobs.length
-    );
-
-    /*
-     * ----------------------------------------------------
-     * STEP 7
-     *
-     * FINAL COUNT
-     * ----------------------------------------------------
-     */
-
-    const finalCount =
-      await db
-        .prepare(
-          `
-          SELECT COUNT(*) AS count
-          FROM jobs
-          WHERE country = ?
-          `
-        )
-        .bind(
-          location
-        )
-        .first<{
-          count: number;
-        }>();
-
-    const finalTotal =
-      Number(
-        finalCount?.count ??
-          0
-      );
-
-    console.log(
-      "[D1] Final total:",
-      finalTotal
-    );
-
-    /*
-     * ----------------------------------------------------
-     * FINAL RESPONSE
-     * ----------------------------------------------------
-     */
-
-    console.log(
-      "=============================================="
-    );
-
-    console.log(
-      "[API] FINAL RESPONSE"
-    );
-
-    console.log(
-      "[API] Jobs:",
-      finalJobs.length
-    );
-
-    console.log(
-      "[API] D1 total:",
-      finalTotal
-    );
-
-    console.log(
-      "[API] Artha total:",
-      artha.total
-    );
-
-    console.log(
-      "[API] Artha has_more:",
-      artha.has_more
-    );
-
-    console.log(
-      "=============================================="
-    );
-
-    return NextResponse.json({
-      success: true,
-
-      jobs:
-        finalJobs,
-
-      total:
-        finalTotal,
-
-      source:
-        "d1",
-
-      artha_total:
-        artha.total,
-
-      artha_has_more:
-        artha.has_more,
-    });
   } catch (error) {
-    console.error(
-      "=============================================="
-    );
-
-    console.error(
-      "[API] GET /api/jobs ERROR"
-    );
-
-    console.error(
-      error
-    );
-
-    console.error(
-      "=============================================="
-    );
-
+    console.error("[API] GET /api/jobs ERROR:", error);
     return NextResponse.json(
       {
         success: false,
-
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to load jobs",
+        error: error instanceof Error ? error.message : "Unable to load jobs",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

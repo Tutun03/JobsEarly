@@ -295,7 +295,7 @@ export default async function JobDetailsPage({ params }: PageProps) {
 
                   {job.url && (
                     <a
-                      href={`/api/jobs/${encodeURIComponent(slug)}/apply`}
+                      href={`/api/jobs/${encodeURIComponent(slug)}/apply?url=${encodeURIComponent(job.url || "")}`}
                       className="primary-button"
                     >
                       Apply Now →

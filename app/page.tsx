@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   useEffect,
   useState,
+  useRef,
 } from "react";
 
 interface BackendJob {
@@ -81,6 +82,7 @@ interface ApiResponse {
 const JOBS_PER_PAGE = 10;
 
 export default function HomePage() {
+  const fetchingRef = useRef<string | null>(null);
   const [
     allJobs,
     setAllJobs,
@@ -94,7 +96,7 @@ export default function HomePage() {
   const [
     pageCache,
     setPageCache,
-  ] = useState<Record<number, Job[]>>({});
+  ] = useState<Record<string, Job[]>>({});
 
   const [
     page,
@@ -216,16 +218,30 @@ export default function HomePage() {
   async function loadJobs(
     targetPage = 1,
     selectedLocation = location,
+    currentSearch = search,
     forceRefresh = false
   ) {
+    const trimmedSearch = currentSearch.trim();
+    const reqKey = `${selectedLocation}_${trimmedSearch.toLowerCase()}_${targetPage}`;
+
+    if (!forceRefresh && fetchingRef.current === reqKey) {
+      console.log(`[CLIENT] Skipping duplicate in-flight fetch for key: ${reqKey}`);
+      return;
+    }
+
+    fetchingRef.current = reqKey;
+
     try {
+      const trimmedSearch = currentSearch.trim();
+      const cacheKey = `${selectedLocation}_${trimmedSearch.toLowerCase()}_${targetPage}`;
+
       if (
         !forceRefresh &&
-        pageCache[targetPage] &&
+        pageCache[cacheKey] &&
         selectedLocation === location
       ) {
-        console.log(`[CLIENT CACHE] Serving Page ${targetPage} from memory`);
-        setAllJobs(pageCache[targetPage]);
+        console.log(`[CLIENT CACHE] Serving Page ${targetPage} from memory for key: ${cacheKey}`);
+        setAllJobs(pageCache[cacheKey]);
         setPage(targetPage);
         return;
       }
@@ -235,12 +251,12 @@ export default function HomePage() {
 
       const offset = (targetPage - 1) * JOBS_PER_PAGE;
 
-      console.log(`[API] Fetching jobs page ${targetPage} (offset: ${offset}, limit: ${JOBS_PER_PAGE})...`);
+      console.log(`[API] Fetching jobs page ${targetPage} (offset: ${offset}, search: "${trimmedSearch}")...`);
 
       const response = await fetch(
         `/api/jobs?location=${encodeURIComponent(
           selectedLocation
-        )}&limit=${JOBS_PER_PAGE}&offset=${offset}`,
+        )}&limit=${JOBS_PER_PAGE}&offset=${offset}&search=${encodeURIComponent(trimmedSearch)}`,
         {
           cache: "no-store",
         }
@@ -260,7 +276,7 @@ export default function HomePage() {
 
       setPageCache((prev) => ({
         ...prev,
-        [targetPage]: normalizedJobs,
+        [cacheKey]: normalizedJobs,
       }));
 
       setAllJobs(normalizedJobs);
@@ -275,6 +291,7 @@ export default function HomePage() {
       );
       setAllJobs([]);
     } finally {
+      fetchingRef.current = null;
       setLoading(false);
     }
   }
@@ -286,7 +303,7 @@ export default function HomePage() {
   */
 
   useEffect(() => {
-    loadJobs(1, "IN");
+    loadJobs(1, "IN", "", false);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -308,47 +325,23 @@ export default function HomePage() {
         return true;
       }
 
-      const title =
-        job.title
-          ?.toLowerCase() ||
-        "";
+      const terms = query.split(/\s+/).filter(Boolean);
+      if (terms.length === 0) {
+        return true;
+      }
 
-      const company =
-        job.company
-          ?.toLowerCase() ||
-        "";
+      const title = job.title?.toLowerCase() || "";
+      const company = job.company?.toLowerCase() || "";
+      const city = job.city?.toLowerCase() || "";
+      const state = job.state?.toLowerCase() || "";
+      const country = job.country?.toLowerCase() || "";
+      const skills = Array.isArray(job.skills)
+        ? job.skills.join(" ").toLowerCase()
+        : String(job.skills ?? "").toLowerCase();
 
-      const city =
-        job.city
-          ?.toLowerCase() ||
-        "";
+      const text = `${title} ${company} ${city} ${state} ${country} ${skills}`;
 
-      const state =
-        job.state
-          ?.toLowerCase() ||
-        "";
-
-      const country =
-        job.country
-          ?.toLowerCase() ||
-        "";
-
-      const skills =
-        job.skills || [];
-
-      return (
-        title.includes(query) ||
-        company.includes(query) ||
-        city.includes(query) ||
-        state.includes(query) ||
-        country.includes(query) ||
-        skills.some(
-          (skill) =>
-            skill
-              .toLowerCase()
-              .includes(query)
-        )
-      );
+      return terms.every((term) => text.includes(term));
     });
 
   /*
@@ -370,7 +363,7 @@ export default function HomePage() {
         )
       : 1;
 
-  const visibleJobs = filteredJobs;
+  const visibleJobs = allJobs;
 
   /*
   |--------------------------------------------------------------------------
@@ -388,7 +381,7 @@ export default function HomePage() {
       return;
     }
 
-    loadJobs(newPage, location);
+    loadJobs(newPage, location, search);
 
     setTimeout(() => {
       document
@@ -410,6 +403,7 @@ export default function HomePage() {
 
   function handleSearch() {
     setPage(1);
+    loadJobs(1, location, search, true);
 
     setTimeout(() => {
       document
@@ -439,7 +433,7 @@ export default function HomePage() {
     setSearch("");
     setPage(1);
 
-    loadJobs(1, newLocation, true);
+    loadJobs(1, newLocation, search, true);
   }
 
   /*
@@ -678,7 +672,7 @@ export default function HomePage() {
                 <button
                   className="primary-button"
                   onClick={() =>
-                    loadJobs(page, location, true)
+                    loadJobs(page, location, search, true)
                   }
                 >
                   Try Again

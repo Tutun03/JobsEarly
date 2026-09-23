@@ -953,13 +953,24 @@ export async function GET(request: NextRequest) {
         .filter((j): j is NormalizedJob => j !== null);
 
       // Fire-and-forget background save to D1 without blocking HTTP response
-      if (db && artha.jobs.length > 0) {
+      /*if (db && artha.jobs.length > 0) {
         setTimeout(() => {
           saveJobs(db, artha.jobs).catch((err) =>
             console.warn("[D1] Background saveJobs error:", err)
           );
         }, 10);
-      }
+      }*/
+     if (db && artha.jobs.length > 0) {
+  const savePromise = saveJobs(db, artha.jobs).catch((err) => {
+    console.warn("[D1] Background saveJobs error:", err);
+  });
+
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(savePromise);
+  } else {
+    await savePromise;
+  }
+}
 
       console.log(`[API] Fast response returning ${normalizedJobs.length} jobs (Total: ${artha.total})`);
 
